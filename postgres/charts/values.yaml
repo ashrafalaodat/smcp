@@ -1,0 +1,170 @@
+replicaCount: 1
+
+image:
+  repository: docker.io/library/postgres
+  tag: "16.3"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: false
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 999
+
+securityContext:
+  runAsUser: 999
+  runAsGroup: 999
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 5432
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 20Gi
+  storageClass: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 1Gi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+primary:
+  database: registry
+  username: registry
+  passwordSecretName: ""
+  passwordSecretKey: password
+
+extensions:
+  enabled: true
+  list:
+    - uuid-ossp
+    - pg_trgm
+    - pgvector
+
+backups:
+  enabled: false
+  schedule: ""  # cron expression
+  retention: 7
+
+extraEnv: []
+
+metrics:
+  enabled: false
+  image:
+    repository: wrouesnel/postgres_exporter
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 9187
+
+initdb:
+  enabled: true
+  scripts:
+    01-extensions.sql: |
+      CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+      CREATE EXTENSION IF NOT EXISTS pg_trgm;
+      DO $$
+      BEGIN
+        CREATE EXTENSION IF NOT EXISTS vector;
+      EXCEPTION
+        WHEN undefined_file THEN
+          RAISE NOTICE 'pgvector extension not available, skipping';
+      END
+      $$;
+    02-schema.sql: |
+      CREATE TABLE IF NOT EXISTS servers (
+        id UUID PRIMARY KEY,
+        name TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        version TEXT NOT NULL,
+        region TEXT NOT NULL,
+        auth_method TEXT NOT NULL,
+        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS capabilities (
+        id UUID PRIMARY KEY,
+        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        type TEXT NOT NULL,
+        name TEXT NOT NULL,
+        schema JSONB NOT NULL DEFAULT '{}'::jsonb,
+        tags TEXT[] NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_capabilities_server_id ON capabilities(server_id);
+      CREATE INDEX IF NOT EXISTS idx_capabilities_tags_gin ON capabilities USING GIN (tags);
+
+      CREATE TABLE IF NOT EXISTS policies (
+        id UUID PRIMARY KEY,
+        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        principal TEXT NOT NULL,
+        allowed_tools TEXT[] NOT NULL DEFAULT '{}',
+        conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_policies_server_id ON policies(server_id);
+
+      CREATE TABLE IF NOT EXISTS health (
+        server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+        last_seen TIMESTAMPTZ NOT NULL,
+        status TEXT NOT NULL,
+        latency_ms INTEGER NOT NULL,
+        error_rate DOUBLE PRECISION NOT NULL,
+        details JSONB NOT NULL DEFAULT '{}'::jsonb,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_health_status ON health(status);
+
+      CREATE TABLE IF NOT EXISTS audit_events (
+        id BIGSERIAL PRIMARY KEY,
+        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        tool_name TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        actor TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_audit_events_server_id ON audit_events(server_id);
+
+  configMap: ""
+
+permissionsInit:
+  enabled: true
+  name: fix-permissions
+  image: docker.io/library/busybox:1.36
+  pullPolicy: IfNotPresent
+  command:
+    - sh
+    - -c
+    - chown -R 999:999 /var/lib/postgresql/data
+
+initContainers: []
+
+extraVolumes: []
+extraVolumeMounts: []

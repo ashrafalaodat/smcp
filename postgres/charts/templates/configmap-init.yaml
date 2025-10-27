@@ -1,0 +1,13 @@
+{{- if and .Values.initdb.enabled .Values.initdb.scripts }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "postgres.fullname" . }}-init
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+data:
+{{- range $name, $content := .Values.initdb.scripts }}
+  {{ $name }}: |
+{{ $content | indent 4 }}
+{{- end }}
+{{- end }}

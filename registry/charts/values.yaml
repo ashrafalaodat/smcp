@@ -1,0 +1,145 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ashrafalaodat/mcp-registry
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+
+podLabels: {}
+
+podSecurityContext: {}
+
+securityContext:
+  runAsUser: 65532
+  runAsGroup: 65532
+  runAsNonRoot: true
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: registry.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+env:
+  - name: MCP_REGISTRY_DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: mcp-registry-db-postgres
+        key: uri
+  - name: MCP_REGISTRY_METRICS_ENABLED
+    value: "true"
+
+extraEnv: []
+
+config:
+  enabled: false
+  data: {}
+
+secret:
+  enabled: false
+  data: {}
+
+migrations:
+  enabled: true
+  image:
+    repository: docker.io/library/postgres
+    tag: "16.3"
+    pullPolicy: IfNotPresent
+  script: |
+    CREATE TABLE IF NOT EXISTS servers (
+      id UUID PRIMARY KEY,
+      name TEXT NOT NULL,
+      endpoint TEXT NOT NULL,
+      version TEXT NOT NULL,
+      region TEXT NOT NULL,
+      auth_method TEXT NOT NULL,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS capabilities (
+      id UUID PRIMARY KEY,
+      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      schema JSONB NOT NULL DEFAULT '{}'::jsonb,
+      tags TEXT[] NOT NULL DEFAULT '{}',
+      created_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_capabilities_server_id ON capabilities(server_id);
+    CREATE INDEX IF NOT EXISTS idx_capabilities_tags_gin ON capabilities USING GIN (tags);
+
+    CREATE TABLE IF NOT EXISTS policies (
+      id UUID PRIMARY KEY,
+      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      principal TEXT NOT NULL,
+      allowed_tools TEXT[] NOT NULL DEFAULT '{}',
+      conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_policies_server_id ON policies(server_id);
+
+    CREATE TABLE IF NOT EXISTS health (
+      server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
+      last_seen TIMESTAMPTZ NOT NULL,
+      status TEXT NOT NULL,
+      latency_ms INTEGER NOT NULL,
+      error_rate DOUBLE PRECISION NOT NULL,
+      details JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_health_status ON health(status);
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id BIGSERIAL PRIMARY KEY,
+      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      tool_name TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_events_server_id ON audit_events(server_id);
+
+extraVolumes: []
+extraVolumeMounts: []

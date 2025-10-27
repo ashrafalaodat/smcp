@@ -1,0 +1,9 @@
+{
+  # disable automatic HTTPS; we're only using plain HTTP for localhost testing
+  auto_https off
+}
+
+:80 {
+  # proxy every Host header straight through to the Kourier NodePort
+  reverse_proxy {$KOURIER_UPSTREAM}
+}

@@ -1,0 +1,17 @@
+#
+# Docker build context ignores for the MCP registry service.
+#
+bin/
+dist/
+vendor/
+.git/
+.gitignore
+.DS_Store
+*.log
+*.out
+*.test
+coverage.*
+tmp/
+*.swp
+*.swo
+node_modules/

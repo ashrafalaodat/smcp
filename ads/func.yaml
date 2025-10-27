@@ -1,0 +1,10 @@
+specVersion: 0.35.0
+name: ads
+runtime: go
+registry: localhost:5000
+image: local-registry:5000/ads:latest
+created: 2025-10-11T20:41:55.324382987+02:00
+build:
+  builder: pack
+deploy:
+  namespace: default
