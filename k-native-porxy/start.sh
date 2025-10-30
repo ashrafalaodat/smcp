@@ -15,13 +15,27 @@ if ! command -v docker >/dev/null 2>&1; then
 fi
 
 # Allow overrides via environment but default to the first node/HTTP NodePort.
-NODE_IP="${KOURIER_NODE_IP:-$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')}"
+if [[ -n "${KOURIER_NODE_IP:-}" ]]; then
+  NODE_IP="${KOURIER_NODE_IP}"
+else
+  NODE_IP="$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')"
+fi
 if [[ -z "${NODE_IP}" ]]; then
   echo "Unable to resolve the Knative node InternalIP. Set KOURIER_NODE_IP and retry." >&2
   exit 1
 fi
 
-NODE_PORT="${KOURIER_NODE_PORT:-$(kubectl get svc kourier -n knative-serving -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')}"
+if [[ -n "${KOURIER_NODE_PORT:-}" ]]; then
+  NODE_PORT="${KOURIER_NODE_PORT}"
+else
+  if kubectl get svc kourier -n knative-serving >/dev/null 2>&1; then
+    NODE_PORT="$(kubectl get svc kourier -n knative-serving -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')"
+  elif kubectl get svc kourier -n kourier-system >/dev/null 2>&1; then
+    NODE_PORT="$(kubectl get svc kourier -n kourier-system -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')"
+  else
+    NODE_PORT=""
+  fi
+fi
 if [[ -z "${NODE_PORT}" ]]; then
   echo "Unable to resolve the Kourier NodePort. Set KOURIER_NODE_PORT and retry." >&2
   exit 1

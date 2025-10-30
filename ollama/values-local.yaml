@@ -1,0 +1,29 @@
+namespace: mcp
+
+runtimeClassName: ""
+
+gpu:
+  enabled: false
+  resourceName: ""
+  count: 0
+
+resources:
+  requests:
+    cpu: 500m
+    memory: 1Gi
+  limits:
+    cpu: "1"
+    memory: 2Gi
+
+env:
+  - name: OLLAMA_USE_GPU
+    value: "0"
+
+models:
+  pull:
+    - nomic-embed-text
+  run: []
+
+nodeSelector: {}
+
+tolerations: []

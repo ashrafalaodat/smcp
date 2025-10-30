@@ -115,7 +115,7 @@ list_response=$(curl --fail-with-body -sS -G "${BASE_URL}/v1/tools" \
   --data-urlencode "name=${TOOL_NAME}")
 echo "${list_response}"
 
-python3 - TOOL_ID="${TOOL_ID}" RESPONSE="${list_response}" <<'PY'
+TOOL_ID="${TOOL_ID}" RESPONSE="${list_response}" python3 - <<'PY'
 import json, os, sys
 tools = json.loads(os.environ["RESPONSE"])
 target = os.environ["TOOL_ID"]
@@ -126,7 +126,7 @@ PY
 echo -e "\n\n>>> GET /v1/tools/${TOOL_ID}"
 get_response=$(curl --fail-with-body -sS "${BASE_URL}/v1/tools/${TOOL_ID}")
 echo "${get_response}"
-python3 - TOOL_ID="${TOOL_ID}" NAME="${TOOL_NAME}" PRINCIPAL="${POLICY_PRINCIPAL}" RESPONSE="${get_response}" <<'PY'
+TOOL_ID="${TOOL_ID}" NAME="${TOOL_NAME}" PRINCIPAL="${POLICY_PRINCIPAL}" RESPONSE="${get_response}" python3 - <<'PY'
 import json, os, sys
 resp = json.loads(os.environ["RESPONSE"])
 tool = resp["tool"]
@@ -148,7 +148,7 @@ audit_response=$(curl --fail-with-body -sS -X POST "${BASE_URL}/v1/tools/${TOOL_
   }')
 echo "${audit_response}"
 
-python3 - RESPONSE="${audit_response}" EXPECTED_ACTOR="${AUDIT_ACTOR}" <<'PY'
+RESPONSE="${audit_response}" EXPECTED_ACTOR="${AUDIT_ACTOR}" python3 - <<'PY'
 import json, os
 data = json.loads(os.environ["RESPONSE"])
 assert data["actor"] == os.environ["EXPECTED_ACTOR"], "audit actor mismatch"
@@ -158,7 +158,7 @@ PY
 echo -e "\n\n>>> GET /v1/tools/${TOOL_ID} (after audit)"
 final_response=$(curl --fail-with-body -sS "${BASE_URL}/v1/tools/${TOOL_ID}")
 echo "${final_response}"
-python3 - RESPONSE="${final_response}" EXPECTED_ACTOR="${AUDIT_ACTOR}" <<'PY'
+RESPONSE="${final_response}" EXPECTED_ACTOR="${AUDIT_ACTOR}" python3 - <<'PY'
 import json, os, sys
 resp = json.loads(os.environ["RESPONSE"])
 audits = resp.get("audits", [])
