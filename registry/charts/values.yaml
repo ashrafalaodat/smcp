@@ -68,7 +68,7 @@ env:
   - name: MCP_REGISTRY_METRICS_ENABLED
     value: "true"
   - name: VECTORIZE_URL
-    value: "http://10.244.1.23:11434/v1/embeddings"
+    value: http://ollama.mcp.svc.cluster.local:11434
   - name: VECTORIZE_API_KEY
     valueFrom:
       secretKeyRef:

@@ -1,0 +1,1 @@
+from .registry_semantic_search import ScenarioConfig, run as run_registry_semantic_search

@@ -22,13 +22,9 @@ type Client struct {
 // New creates a vectorizer client.
 func New(baseURL, apiKey, model string) *Client {
 	const (
-		defaultBaseURL = "http://localhost:11434"
-		defaultModel   = "nomic-embed-text"
+		defaultModel = "nomic-embed-text"
 	)
 
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
 	if model == "" {
 		model = defaultModel
 	}
