@@ -1,8 +1,8 @@
 replicaCount: 2
 
 image:
-  repository: ghcr.io/ashrafalaodat/mcp-registry
-  tag: ""
+  repository: local-registry:5000/mcp-registry
+  tag: "latest"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -67,6 +67,15 @@ env:
         key: uri
   - name: MCP_REGISTRY_METRICS_ENABLED
     value: "true"
+  - name: VECTORIZE_URL
+    value: "http://10.244.1.23:11434/v1/embeddings"
+  - name: VECTORIZE_API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: mcp-vectorize
+        key: apiKey
+  - name: VECTORIZE_MODEL
+    value: "nomic-embed-text"
 
 extraEnv: []
 
@@ -85,61 +94,44 @@ migrations:
     tag: "16.3"
     pullPolicy: IfNotPresent
   script: |
-    CREATE TABLE IF NOT EXISTS servers (
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    CREATE EXTENSION IF NOT EXISTS vector;
+
+    CREATE TABLE IF NOT EXISTS tools (
       id UUID PRIMARY KEY,
+      owner TEXT NOT NULL,
       name TEXT NOT NULL,
-      endpoint TEXT NOT NULL,
-      version TEXT NOT NULL,
-      region TEXT NOT NULL,
-      auth_method TEXT NOT NULL,
-      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      description TEXT NOT NULL,
+      embedding vector,
+      inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+      outputs JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS capabilities (
-      id UUID PRIMARY KEY,
-      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-      type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      schema JSONB NOT NULL DEFAULT '{}'::jsonb,
-      tags TEXT[] NOT NULL DEFAULT '{}',
-      created_at TIMESTAMPTZ NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_capabilities_server_id ON capabilities(server_id);
-    CREATE INDEX IF NOT EXISTS idx_capabilities_tags_gin ON capabilities USING GIN (tags);
+    CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
+    CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
+    CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
 
     CREATE TABLE IF NOT EXISTS policies (
       id UUID PRIMARY KEY,
-      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
       principal TEXT NOT NULL,
-      allowed_tools TEXT[] NOT NULL DEFAULT '{}',
+      allowed_scope TEXT[] NOT NULL DEFAULT '{}',
       conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_policies_server_id ON policies(server_id);
+    CREATE INDEX IF NOT EXISTS idx_policies_tool_id ON policies(tool_id);
 
-    CREATE TABLE IF NOT EXISTS health (
-      server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
-      last_seen TIMESTAMPTZ NOT NULL,
-      status TEXT NOT NULL,
-      latency_ms INTEGER NOT NULL,
-      error_rate DOUBLE PRECISION NOT NULL,
-      details JSONB NOT NULL DEFAULT '{}'::jsonb,
-      updated_at TIMESTAMPTZ NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_health_status ON health(status);
-
-    CREATE TABLE IF NOT EXISTS audit_events (
+    CREATE TABLE IF NOT EXISTS audit (
       id BIGSERIAL PRIMARY KEY,
-      server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-      tool_name TEXT NOT NULL,
+      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
       event_type TEXT NOT NULL,
       actor TEXT NOT NULL,
       payload JSONB NOT NULL DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    CREATE INDEX IF NOT EXISTS idx_audit_events_server_id ON audit_events(server_id);
+    CREATE INDEX IF NOT EXISTS idx_audit_tool_id ON audit(tool_id);
 
 extraVolumes: []
 extraVolumeMounts: []

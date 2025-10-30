@@ -44,7 +44,7 @@ spec:
 {{ toYaml . | indent 12 }}
           {{- end }}
           command:
-            - /bin/sh
+            - /bin/bash
             - -c
           args:
             - |
@@ -81,13 +81,13 @@ spec:
 {{ toYaml .Values.securityContext | indent 12 }}
           readinessProbe:
             httpGet:
-              path: /v1/servers
+              path: /v1/tools
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /v1/servers
+              path: /v1/tools
               port: http
             initialDelaySeconds: 15
             periodSeconds: 20

@@ -1,0 +1,61 @@
+namespace: ollama
+
+image:
+  repository: ollama/ollama
+  tag: "0.12.5"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 11434
+
+resources:
+  requests:
+    cpu: "1"
+    memory: "4Gi"
+  limits:
+    cpu: "2"
+    memory: "8Gi"
+
+runtimeClassName: nvidia
+
+gpu:
+  enabled: true
+  resourceName: nvidia.com/gpu
+  count: 1
+
+persistence:
+  enabled: false
+  size: 20Gi
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  existingClaim: ""
+  mountPath: /root/.ollama
+
+env:
+  - name: OLLAMA_LLM_LIBRARY
+    value: cublas
+  - name: CUDA_VISIBLE_DEVICES
+    value: "0"
+  - name: NVIDIA_VISIBLE_DEVICES
+    value: "0"
+  - name: OLLAMA_USE_GPU
+    value: "1"
+  - name: LD_LIBRARY_PATH
+    value: /usr/lib/ollama/cuda_v12:/usr/lib/ollama/cuda_v13:/usr/local/cuda/lib64:/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+models:
+  pull: ["nomic-embed-text"]
+  run: []
+
+nodeSelector: {}
+
+annotations: {}
+labels: {}
+
+tolerations:
+  - key: "nvidia.com/gpu"
+    operator: Exists
+    effect: NoSchedule
+

@@ -20,6 +20,10 @@ type Config struct {
 	RedisDB      int           `envconfig:"REDIS_DB" default:"0"`
 	RedisTimeout time.Duration `envconfig:"REDIS_TIMEOUT" default:"5s"`
 
+	VectorizeURL    string `envconfig:"VECTORIZE_URL" default:"http://localhost:11434"`
+	VectorizeAPIKey string `envconfig:"VECTORIZE_API_KEY"`
+	VectorizeModel  string `envconfig:"VECTORIZE_MODEL" default:"nomic-embed-text"`
+
 	MetricsEnabled bool   `envconfig:"METRICS_ENABLED" default:"true"`
 	LogLevel       string `envconfig:"LOG_LEVEL" default:"info"`
 }

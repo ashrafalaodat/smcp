@@ -1,0 +1,54 @@
+{{- if .Values.schemaJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "postgres.fullname" . }}-schema
+  labels:
+    {{- include "postgres.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 5
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "postgres.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: schema
+          image: "{{ .Values.schemaJob.image.repository }}:{{ .Values.schemaJob.image.tag }}"
+          imagePullPolicy: {{ .Values.schemaJob.image.pullPolicy }}
+          env:
+            - name: PGHOST
+              value: {{ include "postgres.fullname" . | quote }}
+            - name: PGPORT
+              value: {{ .Values.service.port | quote }}
+            - name: PGUSER
+              value: {{ .Values.primary.username | quote }}
+            - name: PGDATABASE
+              value: {{ .Values.primary.database | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "postgres.fullname" .) .Values.primary.passwordSecretName }}
+                  key: {{ .Values.primary.passwordSecretKey }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              until psql "host=$PGHOST port=$PGPORT dbname=$PGDATABASE user=$PGUSER sslmode=disable" -c '\q' >/dev/null 2>&1; do
+                echo "Waiting for PostgreSQL to be ready..."
+                sleep 2
+              done
+              psql \
+                --set=DBUSER="$PGUSER" \
+                --set=DBPASS="$PGPASSWORD" \
+                --set=DBNAME="$PGDATABASE" \
+                "host=$PGHOST port=$PGPORT dbname=$PGDATABASE user=$PGUSER sslmode=disable" <<'SQL'
+{{- .Values.schemaJob.script | nindent 16 }}
+              SQL
+{{- end }}

@@ -16,6 +16,7 @@ import (
 	"github.com/ashrafalaodat/registry/internal/config"
 	"github.com/ashrafalaodat/registry/internal/persistence/postgres"
 	"github.com/ashrafalaodat/registry/internal/service"
+	"github.com/ashrafalaodat/registry/internal/vectorizer"
 	"github.com/ashrafalaodat/registry/pkg/logging"
 )
 
@@ -45,7 +46,14 @@ func main() {
 	}
 
 	repo := postgres.NewRepository(pool)
-	svc := service.New(repo)
+	var vec service.Vectorizer
+	if cfg.VectorizeURL != "" {
+		vec = vectorizer.New(cfg.VectorizeURL, cfg.VectorizeAPIKey, cfg.VectorizeModel)
+	} else {
+		logger.Warn("vectorizer URL not configured; embeddings will be empty")
+	}
+
+	svc := service.New(repo, vec)
 	handler := httpapi.NewHandler(svc, logger)
 	router := httpapi.NewRouter(handler, cfg.MetricsEnabled)
 

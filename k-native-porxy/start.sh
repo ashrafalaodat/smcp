@@ -21,7 +21,7 @@ if [[ -z "${NODE_IP}" ]]; then
   exit 1
 fi
 
-NODE_PORT="${KOURIER_NODE_PORT:-$(kubectl get svc kourier -n kourier-system -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')}"
+NODE_PORT="${KOURIER_NODE_PORT:-$(kubectl get svc kourier -n knative-serving -o jsonpath='{.spec.ports[?(@.name=="http2")].nodePort}')}"
 if [[ -z "${NODE_PORT}" ]]; then
   echo "Unable to resolve the Kourier NodePort. Set KOURIER_NODE_PORT and retry." >&2
   exit 1

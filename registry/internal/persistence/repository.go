@@ -12,22 +12,22 @@ import (
 // ErrNotFound is returned when an entity cannot be located.
 var ErrNotFound = errors.New("not found")
 
-// Filters narrow server lookup results.
-type Filters struct {
-	Region string
-	Status string
-	Tag    string
+// ToolFilters narrow tool lookup results.
+type ToolFilters struct {
+	Owner string
+	Name  string
+	Query string
 }
 
 // RegistryRepository captures the persistence contract for the registry service.
 type RegistryRepository interface {
-	UpsertServer(ctx context.Context, server domain.Server) (domain.Server, error)
-	ReplaceCapabilities(ctx context.Context, serverID uuid.UUID, capabilities []domain.Capability) error
-	ReplacePolicies(ctx context.Context, serverID uuid.UUID, policies []domain.Policy) error
-	UpsertHealth(ctx context.Context, health domain.Health) error
-	GetServerByID(ctx context.Context, id uuid.UUID) (domain.Server, error)
-	ListServers(ctx context.Context, filters Filters) ([]domain.Server, error)
-	GetCapabilities(ctx context.Context, serverID uuid.UUID) ([]domain.Capability, error)
-	GetPolicies(ctx context.Context, serverID uuid.UUID) ([]domain.Policy, error)
-	GetHealth(ctx context.Context, serverID uuid.UUID) (*domain.Health, error)
+	UpsertTool(ctx context.Context, tool domain.Tool) (domain.Tool, error)
+	GetToolByID(ctx context.Context, id uuid.UUID) (domain.Tool, error)
+	ListTools(ctx context.Context, filters ToolFilters) ([]domain.Tool, error)
+
+	ReplacePolicies(ctx context.Context, toolID uuid.UUID, policies []domain.Policy) error
+	ListPolicies(ctx context.Context, toolID uuid.UUID) ([]domain.Policy, error)
+
+	CreateAudit(ctx context.Context, event domain.AuditEvent) (domain.AuditEvent, error)
+	ListAudits(ctx context.Context, toolID uuid.UUID, limit int) ([]domain.AuditEvent, error)
 }

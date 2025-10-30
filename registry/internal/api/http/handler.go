@@ -1,235 +1,291 @@
 package httpapi
 
 import (
-	"encoding/json"
-	"errors"
-	"net/http"
+    "encoding/json"
+    "errors"
+    "net/http"
+    "time"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"go.uber.org/zap"
+    "github.com/go-chi/chi/v5"
+    "github.com/google/uuid"
+    "go.uber.org/zap"
 
-	"github.com/ashrafalaodat/registry/internal/domain"
-	"github.com/ashrafalaodat/registry/internal/service"
+    "github.com/ashrafalaodat/registry/internal/domain"
+    "github.com/ashrafalaodat/registry/internal/service"
 )
 
 // Handler wraps HTTP endpoints for the registry.
 type Handler struct {
-	service *service.Service
-	logger  *zap.Logger
+    service *service.Service
+    logger  *zap.Logger
 }
 
 // NewHandler constructs a Handler.
 func NewHandler(svc *service.Service, logger *zap.Logger) *Handler {
-	return &Handler{
-		service: svc,
-		logger:  logger,
-	}
+    return &Handler{
+        service: svc,
+        logger:  logger,
+    }
 }
 
 // RegisterRoutes wires the registry routes onto the router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
-	r.Route("/v1", func(r chi.Router) {
-		r.Post("/servers", h.handleRegisterServer)
-		r.Put("/servers/{id}/heartbeat", h.handleHeartbeat)
-		r.Get("/servers", h.handleListServers)
-	})
+    r.Route("/v1", func(r chi.Router) {
+        r.Post("/tools", h.handleRegisterTool)
+        r.Get("/tools", h.handleListTools)
+        r.Get("/tools/{id}", h.handleGetTool)
+        r.Post("/tools/{id}/audits", h.handleCreateAudit)
+    })
 }
 
-func (h *Handler) handleRegisterServer(w http.ResponseWriter, r *http.Request) {
-	var payload registerServerRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid payload", err)
-		return
-	}
+func (h *Handler) handleRegisterTool(w http.ResponseWriter, r *http.Request) {
+    var payload registerToolRequest
+    if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+        h.writeError(w, http.StatusBadRequest, "invalid payload", err)
+        return
+    }
 
-	var serverID *uuid.UUID
-	if payload.ID != "" {
-		id, err := uuid.Parse(payload.ID)
-		if err != nil {
-			h.writeError(w, http.StatusBadRequest, "invalid id", err)
-			return
-		}
-		serverID = &id
-	}
+    var toolID *uuid.UUID
+    if payload.ID != "" {
+        id, err := uuid.Parse(payload.ID)
+        if err != nil {
+            h.writeError(w, http.StatusBadRequest, "invalid id", err)
+            return
+        }
+        toolID = &id
+    }
 
-	input := service.RegisterServerInput{
-		ID:         serverID,
-		Name:       payload.Name,
-		Endpoint:   payload.Endpoint,
-		Version:    payload.Version,
-		Region:     payload.Region,
-		AuthMethod: payload.AuthMethod,
-		Metadata:   payload.Metadata,
-	}
+    input := service.RegisterToolInput{
+        ID:          toolID,
+        Owner:       payload.Owner,
+        Name:        payload.Name,
+        Description: payload.Description,
+        Inputs:      payload.Inputs,
+        Outputs:     payload.Outputs,
+    }
 
-	for _, cap := range payload.Capabilities {
-		var capabilityID *uuid.UUID
-		if cap.ID != "" {
-			id, err := uuid.Parse(cap.ID)
-			if err != nil {
-				h.writeError(w, http.StatusBadRequest, "invalid capability id", err)
-				return
-			}
-			capabilityID = &id
-		}
-		input.Capabilities = append(input.Capabilities, service.CapabilityInput{
-			ID:     capabilityID,
-			Type:   cap.Type,
-			Name:   cap.Name,
-			Schema: cap.Schema,
-			Tags:   cap.Tags,
-		})
-	}
+    for _, policy := range payload.Policies {
+        var policyID *uuid.UUID
+        if policy.ID != "" {
+            id, err := uuid.Parse(policy.ID)
+            if err != nil {
+                h.writeError(w, http.StatusBadRequest, "invalid policy id", err)
+                return
+            }
+            policyID = &id
+        }
+        input.Policies = append(input.Policies, service.PolicyInput{
+            ID:           policyID,
+            Principal:    policy.Principal,
+            AllowedScope: policy.AllowedScope,
+            Conditions:   policy.Conditions,
+        })
+    }
 
-	for _, pol := range payload.Policies {
-		var policyID *uuid.UUID
-		if pol.ID != "" {
-			id, err := uuid.Parse(pol.ID)
-			if err != nil {
-				h.writeError(w, http.StatusBadRequest, "invalid policy id", err)
-				return
-			}
-			policyID = &id
-		}
-		input.Policies = append(input.Policies, service.PolicyInput{
-			ID:           policyID,
-			Principal:    pol.Principal,
-			AllowedTools: pol.AllowedTools,
-			Conditions:   pol.Conditions,
-		})
-	}
+    details, err := h.service.RegisterTool(r.Context(), input)
+    if err != nil {
+        status := http.StatusInternalServerError
+        if errors.Is(err, service.ErrToolNotFound) {
+            status = http.StatusNotFound
+        }
+        h.writeError(w, status, "register tool failed", err)
+        return
+    }
 
-	snapshot, err := h.service.RegisterServer(r.Context(), input)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "register server failed", err)
-		return
-	}
-
-	h.writeJSON(w, http.StatusCreated, toServerSnapshotPayload(snapshot))
+    h.writeJSON(w, http.StatusCreated, toToolDetailsPayload(details))
 }
 
-func (h *Handler) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
-	serverID, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid server id", err)
-		return
-	}
+func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
+    input := service.ListToolsInput{
+        Owner: r.URL.Query().Get("owner"),
+        Name:  r.URL.Query().Get("name"),
+        Query: r.URL.Query().Get("q"),
+    }
 
-	var payload heartbeatRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid payload", err)
-		return
-	}
+    tools, err := h.service.ListTools(r.Context(), input)
+    if err != nil {
+        h.writeError(w, http.StatusInternalServerError, "list tools failed", err)
+        return
+    }
 
-	snapshot, err := h.service.ReportHeartbeat(r.Context(), serverID, service.HeartbeatInput{
-		Status:    payload.Status,
-		LatencyMS: payload.LatencyMS,
-		ErrorRate: payload.ErrorRate,
-		Details:   payload.Details,
-	})
-	if err != nil {
-		if errors.Is(err, service.ErrServerNotFound) {
-			h.writeError(w, http.StatusNotFound, "server not found", err)
-			return
-		}
-		h.writeError(w, http.StatusInternalServerError, "heartbeat failed", err)
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, toServerSnapshotPayload(snapshot))
+    payload := make([]toolPayload, 0, len(tools))
+    for _, tool := range tools {
+        payload = append(payload, toToolPayload(tool))
+    }
+    h.writeJSON(w, http.StatusOK, payload)
 }
 
-func (h *Handler) handleListServers(w http.ResponseWriter, r *http.Request) {
-	input := service.ListServersInput{
-		Region: r.URL.Query().Get("region"),
-		Status: r.URL.Query().Get("status"),
-		Tag:    r.URL.Query().Get("tag"),
-	}
+func (h *Handler) handleGetTool(w http.ResponseWriter, r *http.Request) {
+    id, err := uuid.Parse(chi.URLParam(r, "id"))
+    if err != nil {
+        h.writeError(w, http.StatusBadRequest, "invalid id", err)
+        return
+    }
 
-	snapshots, err := h.service.ListServers(r.Context(), input)
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, "list servers failed", err)
-		return
-	}
+    details, err := h.service.GetTool(r.Context(), id)
+    if err != nil {
+        status := http.StatusInternalServerError
+        if errors.Is(err, service.ErrToolNotFound) {
+            status = http.StatusNotFound
+        }
+        h.writeError(w, status, "get tool failed", err)
+        return
+    }
 
-	response := make([]serverSnapshotPayload, 0, len(snapshots))
-	for _, snapshot := range snapshots {
-		response = append(response, toServerSnapshotPayload(snapshot))
-	}
-	h.writeJSON(w, http.StatusOK, response)
+    h.writeJSON(w, http.StatusOK, toToolDetailsPayload(details))
+}
+
+func (h *Handler) handleCreateAudit(w http.ResponseWriter, r *http.Request) {
+    id, err := uuid.Parse(chi.URLParam(r, "id"))
+    if err != nil {
+        h.writeError(w, http.StatusBadRequest, "invalid id", err)
+        return
+    }
+
+    var payload auditRequest
+    if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+        h.writeError(w, http.StatusBadRequest, "invalid payload", err)
+        return
+    }
+
+    event, err := h.service.RecordAudit(r.Context(), id, service.AuditInput{
+        EventType: payload.EventType,
+        Actor:     payload.Actor,
+        Payload:   payload.Payload,
+    })
+    if err != nil {
+        status := http.StatusInternalServerError
+        if errors.Is(err, service.ErrToolNotFound) {
+            status = http.StatusNotFound
+        }
+        h.writeError(w, status, "record audit failed", err)
+        return
+    }
+
+    h.writeJSON(w, http.StatusCreated, event)
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, payload any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if payload == nil {
-		return
-	}
-	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		h.logger.Error("write json failed", zap.Error(err))
-	}
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(status)
+    if payload == nil {
+        return
+    }
+    if err := json.NewEncoder(w).Encode(payload); err != nil {
+        h.logger.Error("write json failed", zap.Error(err))
+    }
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, message string, err error) {
-	h.logger.Error(message, zap.Int("status", status), zap.Error(err))
-	h.writeJSON(w, status, errorResponse{
-		Error:   message,
-		Details: err.Error(),
-	})
+    h.logger.Error(message, zap.Int("status", status), zap.Error(err))
+    h.writeJSON(w, status, errorResponse{
+        Error:   message,
+        Details: err.Error(),
+    })
 }
 
-type registerServerRequest struct {
-	ID           string                    `json:"id"`
-	Name         string                    `json:"name"`
-	Endpoint     string                    `json:"endpoint"`
-	Version      string                    `json:"version"`
-	Region       string                    `json:"region"`
-	AuthMethod   string                    `json:"auth_method"`
-	Metadata     map[string]any            `json:"metadata"`
-	Capabilities []capabilityRequest       `json:"capabilities"`
-	Policies     []policyRequest           `json:"policies"`
-}
-
-type capabilityRequest struct {
-	ID     string         `json:"id"`
-	Type   string         `json:"type"`
-	Name   string         `json:"name"`
-	Schema map[string]any `json:"schema"`
-	Tags   []string       `json:"tags"`
+type registerToolRequest struct {
+    ID          string            `json:"id"`
+    Owner       string            `json:"owner"`
+    Name        string            `json:"name"`
+    Description string            `json:"description"`
+    Inputs      map[string]string `json:"inputs"`
+    Outputs     map[string]string `json:"outputs"`
+    Policies    []policyRequest   `json:"policies"`
 }
 
 type policyRequest struct {
-	ID           string         `json:"id"`
-	Principal    string         `json:"principal"`
-	AllowedTools []string       `json:"allowed_tools"`
-	Conditions   map[string]any `json:"conditions"`
+    ID           string         `json:"id"`
+    Principal    string         `json:"principal"`
+    AllowedScope []string       `json:"allowed_scope"`
+    Conditions   map[string]any `json:"conditions"`
 }
 
-type heartbeatRequest struct {
-	Status    string         `json:"status"`
-	LatencyMS int            `json:"latency_ms"`
-	ErrorRate float64        `json:"error_rate"`
-	Details   map[string]any `json:"details"`
+type auditRequest struct {
+    EventType string          `json:"event_type"`
+    Actor     string          `json:"actor"`
+    Payload   map[string]any  `json:"payload"`
 }
 
 type errorResponse struct {
-	Error   string `json:"error"`
-	Details string `json:"details,omitempty"`
+    Error   string `json:"error"`
+    Details string `json:"details,omitempty"`
 }
 
-type serverSnapshotPayload struct {
-	Server       domain.Server      `json:"server"`
-	Capabilities []domain.Capability `json:"capabilities,omitempty"`
-	Policies     []domain.Policy     `json:"policies,omitempty"`
-	Health       *domain.Health      `json:"health,omitempty"`
+type toolPayload struct {
+    ID          uuid.UUID         `json:"id"`
+    Owner       string            `json:"owner"`
+    Name        string            `json:"name"`
+    Description string            `json:"description"`
+    Embedding   []float32         `json:"embedding"`
+    Inputs      map[string]string `json:"inputs"`
+    Outputs     map[string]string `json:"outputs"`
+    CreatedAt   string            `json:"created_at"`
+    UpdatedAt   string            `json:"updated_at"`
 }
 
-func toServerSnapshotPayload(snapshot domain.ServerSnapshot) serverSnapshotPayload {
-	return serverSnapshotPayload{
-		Server:       snapshot.Server,
-		Capabilities: snapshot.Capabilities,
-		Policies:     snapshot.Policies,
-		Health:       snapshot.Health,
-	}
+type policyPayload struct {
+    ID           uuid.UUID        `json:"id"`
+    Principal    string           `json:"principal"`
+    AllowedScope []string         `json:"allowed_scope"`
+    Conditions   map[string]any   `json:"conditions"`
+    CreatedAt    string           `json:"created_at"`
+}
+
+type auditPayload struct {
+    ID        int64           `json:"id"`
+    EventType string          `json:"event_type"`
+    Actor     string          `json:"actor"`
+    Payload   map[string]any  `json:"payload"`
+    CreatedAt string          `json:"created_at"`
+}
+
+type toolDetailsPayload struct {
+    Tool     toolPayload     `json:"tool"`
+    Policies []policyPayload `json:"policies"`
+    Audits   []auditPayload  `json:"audits"`
+}
+
+func toToolPayload(tool domain.Tool) toolPayload {
+    return toolPayload{
+        ID:          tool.ID,
+        Owner:       tool.Owner,
+        Name:        tool.Name,
+        Description: tool.Description,
+        Embedding:   tool.Embedding,
+        Inputs:      tool.Inputs,
+        Outputs:     tool.Outputs,
+        CreatedAt:   tool.CreatedAt.UTC().Format(time.RFC3339Nano),
+        UpdatedAt:   tool.UpdatedAt.UTC().Format(time.RFC3339Nano),
+    }
+}
+
+func toToolDetailsPayload(details domain.ToolDetails) toolDetailsPayload {
+    policies := make([]policyPayload, 0, len(details.Policies))
+    for _, policy := range details.Policies {
+        policies = append(policies, policyPayload{
+            ID:           policy.ID,
+            Principal:    policy.Principal,
+            AllowedScope: policy.AllowedScope,
+            Conditions:   policy.Conditions,
+            CreatedAt:    policy.CreatedAt.UTC().Format(time.RFC3339Nano),
+        })
+    }
+
+    audits := make([]auditPayload, 0, len(details.Audits))
+    for _, audit := range details.Audits {
+        audits = append(audits, auditPayload{
+            ID:        audit.ID,
+            EventType: audit.EventType,
+            Actor:     audit.Actor,
+            Payload:   audit.Payload,
+            CreatedAt: audit.CreatedAt.UTC().Format(time.RFC3339Nano),
+        })
+    }
+
+    return toolDetailsPayload{
+        Tool:     toToolPayload(details.Tool),
+        Policies: policies,
+        Audits:   audits,
+    }
 }

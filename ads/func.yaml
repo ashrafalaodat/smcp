@@ -1,8 +1,9 @@
 specVersion: 0.35.0
 name: ads
 runtime: go
-registry: localhost:5000
-image: local-registry:5000/ads:latest
+registry: ttl.sh/ads-func-1761771945
+image: ttl.sh/ads-func-1761771945/ads:latest
+imageDigest: sha256:97c8e72c48512f6df1a4103bfdffcd8d4a8e43510a061ee23e37b7be4fca4a15
 created: 2025-10-11T20:41:55.324382987+02:00
 build:
   builder: pack

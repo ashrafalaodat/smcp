@@ -1,8 +1,8 @@
 replicaCount: 1
 
 image:
-  repository: docker.io/library/postgres
-  tag: "16.3"
+  repository: docker.io/pgvector/pgvector
+  tag: "pg16"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -96,63 +96,104 @@ initdb:
       END
       $$;
     02-schema.sql: |
-      CREATE TABLE IF NOT EXISTS servers (
+      CREATE TABLE IF NOT EXISTS tools (
         id UUID PRIMARY KEY,
+        owner TEXT NOT NULL,
         name TEXT NOT NULL,
-        endpoint TEXT NOT NULL,
-        version TEXT NOT NULL,
-        region TEXT NOT NULL,
-        auth_method TEXT NOT NULL,
-        metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+        description TEXT NOT NULL,
+        embedding vector,
+        inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+        outputs JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
-
-      CREATE TABLE IF NOT EXISTS capabilities (
-        id UUID PRIMARY KEY,
-        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-        type TEXT NOT NULL,
-        name TEXT NOT NULL,
-        schema JSONB NOT NULL DEFAULT '{}'::jsonb,
-        tags TEXT[] NOT NULL DEFAULT '{}',
-        created_at TIMESTAMPTZ NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_capabilities_server_id ON capabilities(server_id);
-      CREATE INDEX IF NOT EXISTS idx_capabilities_tags_gin ON capabilities USING GIN (tags);
+      CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
+      CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
+      CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
 
       CREATE TABLE IF NOT EXISTS policies (
         id UUID PRIMARY KEY,
-        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
         principal TEXT NOT NULL,
-        allowed_tools TEXT[] NOT NULL DEFAULT '{}',
+        allowed_scope TEXT[] NOT NULL DEFAULT '{}',
         conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_policies_server_id ON policies(server_id);
+      CREATE INDEX IF NOT EXISTS idx_policies_tool_id ON policies(tool_id);
 
-      CREATE TABLE IF NOT EXISTS health (
-        server_id UUID PRIMARY KEY REFERENCES servers(id) ON DELETE CASCADE,
-        last_seen TIMESTAMPTZ NOT NULL,
-        status TEXT NOT NULL,
-        latency_ms INTEGER NOT NULL,
-        error_rate DOUBLE PRECISION NOT NULL,
-        details JSONB NOT NULL DEFAULT '{}'::jsonb,
-        updated_at TIMESTAMPTZ NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_health_status ON health(status);
-
-      CREATE TABLE IF NOT EXISTS audit_events (
+      CREATE TABLE IF NOT EXISTS audit (
         id BIGSERIAL PRIMARY KEY,
-        server_id UUID NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
-        tool_name TEXT NOT NULL,
+        tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
         event_type TEXT NOT NULL,
         actor TEXT NOT NULL,
         payload JSONB NOT NULL DEFAULT '{}'::jsonb,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
-      CREATE INDEX IF NOT EXISTS idx_audit_events_server_id ON audit_events(server_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_tool_id ON audit(tool_id);
 
   configMap: ""
+
+schemaJob:
+  enabled: true
+  image:
+    repository: docker.io/pgvector/pgvector
+    tag: "pg16"
+    pullPolicy: IfNotPresent
+  script: |
+    \set db_user :'DBUSER'
+    \set db_pass :'DBPASS'
+    \set db_name :'DBNAME'
+
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = :'db_user') THEN
+        EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', :'db_user', :'db_pass');
+      ELSE
+        EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', :'db_user', :'db_pass');
+      END IF;
+    END
+    $$;
+
+    GRANT ALL PRIVILEGES ON DATABASE :"db_name" TO :"db_user";
+
+    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+    CREATE EXTENSION IF NOT EXISTS pg_trgm;
+    CREATE EXTENSION IF NOT EXISTS vector;
+
+    CREATE TABLE IF NOT EXISTS tools (
+      id UUID PRIMARY KEY,
+      owner TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL,
+      embedding vector,
+      inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+      outputs JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
+    CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
+    CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
+
+    CREATE TABLE IF NOT EXISTS policies (
+      id UUID PRIMARY KEY,
+      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+      principal TEXT NOT NULL,
+      allowed_scope TEXT[] NOT NULL DEFAULT '{}',
+      conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_policies_tool_id ON policies(tool_id);
+
+    CREATE TABLE IF NOT EXISTS audit (
+      id BIGSERIAL PRIMARY KEY,
+      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
+      event_type TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_tool_id ON audit(tool_id);
 
 permissionsInit:
   enabled: true
