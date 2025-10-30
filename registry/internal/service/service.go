@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,6 +15,9 @@ import (
 
 // ErrToolNotFound indicates the requested tool id does not exist.
 var ErrToolNotFound = errors.New("tool not found")
+
+// ErrVectorizerUnavailable signals vector search cannot be performed.
+var ErrVectorizerUnavailable = errors.New("vectorizer not configured")
 
 // Vectorizer describes the semantic embedding dependency.
 type Vectorizer interface {
@@ -60,6 +64,11 @@ type ListToolsInput struct {
 	Owner string
 	Name  string
 	Query string
+}
+
+type SearchToolsInput struct {
+	Description string
+	Limit       int
 }
 
 // AuditInput captures audit event data.
@@ -176,6 +185,44 @@ func (s *Service) ListTools(ctx context.Context, input ListToolsInput) ([]domain
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
 	return tools, nil
+}
+
+// SearchTools returns the top-k tools most similar to the provided description.
+func (s *Service) SearchTools(ctx context.Context, input SearchToolsInput) ([]domain.Tool, error) {
+	description := strings.TrimSpace(input.Description)
+	if description == "" {
+		return nil, fmt.Errorf("description is required")
+	}
+	if s.vectorizer == nil {
+		return nil, ErrVectorizerUnavailable
+	}
+
+	embedding, err := s.vectorizer.Embed(ctx, description)
+	if err != nil {
+		return nil, fmt.Errorf("vectorize description: %w", err)
+	}
+
+	limit := input.Limit
+	if limit <= 0 {
+		limit = 5
+	}
+
+	tools, err := s.repo.SearchToolsByEmbedding(ctx, embedding, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search tools: %w", err)
+	}
+	return tools, nil
+}
+
+// DeleteTool removes a tool and its associated data.
+func (s *Service) DeleteTool(ctx context.Context, id uuid.UUID) error {
+	if err := s.repo.DeleteTool(ctx, id); err != nil {
+		if errors.Is(err, persistence.ErrNotFound) {
+			return ErrToolNotFound
+		}
+		return fmt.Errorf("delete tool: %w", err)
+	}
+	return nil
 }
 
 // RecordAudit attaches an audit event to a tool.

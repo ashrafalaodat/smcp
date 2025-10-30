@@ -217,6 +217,87 @@ func (r *Repository) ListTools(ctx context.Context, filters persistence.ToolFilt
 	return tools, nil
 }
 
+// SearchToolsByEmbedding returns the closest tools to the provided embedding.
+func (r *Repository) SearchToolsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]domain.Tool, error) {
+	if len(embedding) == 0 {
+		return nil, fmt.Errorf("embedding vector is required")
+	}
+	if limit <= 0 {
+		limit = 5
+	}
+
+	const query = `
+        SELECT id, owner, name, description, embedding, inputs, outputs, created_at, updated_at
+        FROM tools
+        WHERE embedding IS NOT NULL
+        ORDER BY embedding <-> $1
+        LIMIT $2;
+    `
+
+	rows, err := r.pool.Query(ctx, query, pgvector.NewVector(embedding), limit)
+	if err != nil {
+		return nil, fmt.Errorf("search tools: %w", err)
+	}
+	defer rows.Close()
+
+	var tools []domain.Tool
+	for rows.Next() {
+		var (
+			tool    domain.Tool
+			inputs  []byte
+			outputs []byte
+			vec     scannedVector
+		)
+
+		if err := rows.Scan(
+			&tool.ID,
+			&tool.Owner,
+			&tool.Name,
+			&tool.Description,
+			&vec,
+			&inputs,
+			&outputs,
+			&tool.CreatedAt,
+			&tool.UpdatedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan tool: %w", err)
+		}
+
+		tool.Embedding = vec.Slice()
+		if err := json.Unmarshal(inputs, &tool.Inputs); err != nil {
+			return nil, fmt.Errorf("unmarshal inputs: %w", err)
+		}
+		if err := json.Unmarshal(outputs, &tool.Outputs); err != nil {
+			return nil, fmt.Errorf("unmarshal outputs: %w", err)
+		}
+
+		tools = append(tools, tool)
+	}
+
+	if rows.Err() != nil {
+		return nil, fmt.Errorf("rows error: %w", rows.Err())
+	}
+
+	return tools, nil
+}
+
+// DeleteTool removes a tool and its dependent records.
+func (r *Repository) DeleteTool(ctx context.Context, id uuid.UUID) error {
+	const query = `
+        DELETE FROM tools
+        WHERE id = $1;
+    `
+
+	cmdTag, err := r.pool.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("delete tool: %w", err)
+	}
+	if cmdTag.RowsAffected() == 0 {
+		return persistence.ErrNotFound
+	}
+	return nil
+}
+
 // ReplacePolicies replaces the policy set for a tool.
 func (r *Repository) ReplacePolicies(ctx context.Context, toolID uuid.UUID, policies []domain.Policy) error {
 	const deleteStmt = `DELETE FROM policies WHERE tool_id = $1;`
