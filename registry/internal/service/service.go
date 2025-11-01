@@ -115,6 +115,9 @@ func (s *Service) RegisterTool(ctx context.Context, input RegisterToolInput) (do
 			return domain.ToolDetails{}, fmt.Errorf("vectorize description: %w", err)
 		}
 	}
+	if len(embedding) == 0 {
+		return domain.ToolDetails{}, fmt.Errorf("embedding is required")
+	}
 	now := s.now()
 	createdAt := current.CreatedAt
 	if createdAt.IsZero() {

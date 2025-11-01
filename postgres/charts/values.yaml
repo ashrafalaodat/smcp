@@ -107,6 +107,29 @@ initdb:
         created_at TIMESTAMPTZ NOT NULL,
         updated_at TIMESTAMPTZ NOT NULL
       );
+      ALTER TABLE tools ALTER COLUMN owner SET NOT NULL;
+      ALTER TABLE tools ALTER COLUMN name SET NOT NULL;
+      ALTER TABLE tools ALTER COLUMN description SET NOT NULL;
+      DO $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM tools WHERE embedding IS NULL) THEN
+          RAISE EXCEPTION 'tools.embedding contains NULL values. Populate embeddings before upgrading.';
+        END IF;
+      END
+      $$;
+      ALTER TABLE tools ALTER COLUMN embedding SET NOT NULL;
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'tools_owner_name_unique'
+            AND conrelid = 'tools'::regclass
+        ) THEN
+          ALTER TABLE tools ADD CONSTRAINT tools_owner_name_unique UNIQUE (owner, name);
+        END IF;
+      END
+      $$;
       CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
       CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
       CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
@@ -171,6 +194,29 @@ schemaJob:
       created_at TIMESTAMPTZ NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL
     );
+    ALTER TABLE tools ALTER COLUMN owner SET NOT NULL;
+    ALTER TABLE tools ALTER COLUMN name SET NOT NULL;
+    ALTER TABLE tools ALTER COLUMN description SET NOT NULL;
+    DO $$
+    BEGIN
+      IF EXISTS (SELECT 1 FROM tools WHERE embedding IS NULL) THEN
+        RAISE EXCEPTION 'tools.embedding contains NULL values. Populate embeddings before upgrading.';
+      END IF;
+    END
+    $$;
+    ALTER TABLE tools ALTER COLUMN embedding SET NOT NULL;
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'tools_owner_name_unique'
+          AND conrelid = 'tools'::regclass
+      ) THEN
+        ALTER TABLE tools ADD CONSTRAINT tools_owner_name_unique UNIQUE (owner, name);
+      END IF;
+    END
+    $$;
     CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
     CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
     CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
