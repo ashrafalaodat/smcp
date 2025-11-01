@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-deployment
+  namespace: knative-serving
+data:
+  queue-sidecar-image: gcr.io/knative-releases/knative.dev/serving/cmd/queue@sha256:7ccae735b70742edcde0e31c8bab4b69b205c7406c01add9364369980e074346
+  registries-skipping-tag-resolving: kind.local,ko.local,dev.local,local-registry:5000

@@ -1,0 +1,15 @@
+POST /mcp HTTP/1.1
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "initialize",
+  "params": {
+    "client": {
+      "name": "example-client",
+      "version": "0.1.0"
+    },
+    "protocolVersion": "2024-11-05"
+  }
+}
