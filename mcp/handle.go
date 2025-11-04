@@ -110,7 +110,7 @@ func initializeServer() error {
 		),
 		mcp.WithNumber(
 			"limit",
-			mcp.Description("Maximum number of tools to return."),
+			mcp.Description("Maximum number of tools to return. Optional; defaults to 5."),
 			mcp.Min(1),
 			mcp.Max(50),
 			mcp.DefaultNumber(defaultSearchLimit),

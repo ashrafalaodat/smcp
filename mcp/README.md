@@ -8,7 +8,7 @@ Incoming HTTP requests are handled by `mark3labs/mcp-go` using the streamable HT
 
 | Variable              | Default                                        | Description                                                      |
 |-----------------------|------------------------------------------------|------------------------------------------------------------------|
-| `REGISTRY_BASE_URL`   | `http://mcp-registry.default.svc.cluster.local` | Base URL of the app registry. Must expose `/v1/tools/search`.    |
+| `REGISTRY_BASE_URL`   | `http://mcp-registry.mcp.svc.cluster.local` | Base URL of the app registry. Must expose `/v1/tools/search`.    |
 | `MCP_SERVER_NAME`     | `Registry Semantic Search`                      | Display name reported during MCP `initialize`.                   |
 | `MCP_SERVER_VERSION`  | `0.1.0`                                         | Version string reported during MCP `initialize`.                 |
 

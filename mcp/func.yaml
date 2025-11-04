@@ -1,11 +1,14 @@
 specVersion: 0.35.0
 name: registry-mcp-search
 runtime: go
-# docker network inspect kind | jq -r '.[0].IPAM.Config[0].Gateway' 172.23.0.1
 registry: local-registry:5000
 image: local-registry:5000/registry-mcp-search:latest
 created: 2024-10-31T13:45:00Z
 build:
   builder: pack
+run:
+  envs:
+  - name: REGISTRY_BASE_URL
+    value: http://mcp-registry.mcp.svc.cluster.local
 deploy:
   namespace: mcp
