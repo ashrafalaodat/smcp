@@ -20,7 +20,7 @@ const (
 	defaultRegistryBaseURL = "http://mcp-registry.mcp.svc.cluster.local"
 	registrySearchPath     = "/v1/tools/search"
 	defaultSearchLimit     = 5
-	requestTimeout         = 10 * time.Second
+	requestTimeout         = 30 * time.Second
 	maxResponseBytes       = 1 << 20 // 1 MiB
 )
 
@@ -188,7 +188,7 @@ func initializeServer() error {
 			return mcp.NewToolResultErrorFromErr("invoke tool failed", err), nil
 		}
 
-		summary := fmt.Sprintf("Invoked %s/%s via %s (status %d).", invokeRes.Owner, invokeRes.Name, invokeRes.Endpoint, invokeRes.Status)
+		summary := summarizeInvokeResult(invokeRes)
 		return mcp.NewToolResultStructured(invokeRes, summary), nil
 	})
 
@@ -310,7 +310,9 @@ func invokeRegistryTool(ctx context.Context, baseURL string, args invokeArgs) (i
 		}
 	}
 
-	result.Raw = string(data)
+	text := string(data)
+	result.Result = text
+	result.Raw = text
 	return result, nil
 }
 
@@ -346,10 +348,12 @@ func fetchRegistryTool(ctx context.Context, baseURL, toolID string) (registryToo
 func formatToolEndpoint(name, owner string) (string, error) {
 	safeName := sanitizeSubdomain(name)
 	safeOwner := sanitizeSubdomain(owner)
+
 	if safeName == "" || safeOwner == "" {
 		return "", fmt.Errorf("cannot derive endpoint for name=%q owner=%q", name, owner)
 	}
-	return fmt.Sprintf("http://%s.%s.localhost", safeName, safeOwner), nil
+
+	return fmt.Sprintf("http://%s.%s.svc.cluster.local", safeName, safeOwner), nil
 }
 
 func sanitizeSubdomain(input string) string {
@@ -424,6 +428,24 @@ func getEnv(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func summarizeInvokeResult(res invokeResult) string {
+	switch v := res.Result.(type) {
+	case string:
+		return v
+	case []byte:
+		return string(v)
+	case fmt.Stringer:
+		return v.String()
+	case nil:
+		// fall through to default summary
+	default:
+		if encoded, err := json.Marshal(v); err == nil {
+			return string(encoded)
+		}
+	}
+	return fmt.Sprintf("Invoked %s/%s via %s (status %d).", res.Owner, res.Name, res.Endpoint, res.Status)
 }
 
 func init() {
