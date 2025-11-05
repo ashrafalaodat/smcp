@@ -5,6 +5,7 @@ A standalone discovery catalog for Model Context Protocol (MCP) tools. Each tool
 ## Features
 - Go chi-based HTTP API for tool registration, lookup, and audit logging (`POST /v1/tools`, `GET /v1/tools`, `GET /v1/tools/{id}`, `POST /v1/tools/{id}/audits`).
 - Automatic text embeddings via an external vectorization microservice (configurable URL/API key) stored with `pgvector` for semantic discovery.
+- Optional reranking against an external cross-encoder model to refine semantic search results (fetches up to 3× the requested limit, reranks, then returns the top N).
 - Policy management tied to each tool with JSON condition payloads.
 - Structured logging (zap) and optional Prometheus metrics endpoint.
 - Helm charts for application and PostgreSQL (with init scripts installing required extensions and schema).
@@ -33,6 +34,10 @@ Environment variables (prefixed `MCP_REGISTRY_`):
 | `VECTORIZE_URL` | Base URL for the vectorization microservice | `http://localhost:11434` |
 | `VECTORIZE_API_KEY` | Optional bearer token for vectorizer requests | _(unset)_ |
 | `VECTORIZE_MODEL` | Embedding model to request from the vectorizer | `nomic-embed-text` |
+| `RERANK_URL` | Full endpoint for the reranking API (e.g. Cohere `https://api.cohere.ai/v1/rerank`) | _(unset)_ |
+| `RERANK_API_KEY` | Optional bearer token for reranker requests | _(unset)_ |
+| `RERANK_MODEL` | Reranking model identifier used by the API | `rerank-english-v3.0` |
+| `RERANK_TOP_N` | Candidate count for the reranker to score (clamped to results) | `20` |
 | `METRICS_ENABLED` | Expose `/metrics` | `true` |
 | `LOG_LEVEL` | Structured log level (`debug`,`info`,`warn`,`error`) | `info` |
 

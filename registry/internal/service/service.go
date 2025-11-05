@@ -24,18 +24,25 @@ type Vectorizer interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
+// Reranker scores and reorders search candidates for improved relevance.
+type Reranker interface {
+	Rank(ctx context.Context, query string, candidates []domain.Tool) ([]domain.Tool, error)
+}
+
 // Service coordinates business logic for the registry.
 type Service struct {
 	repo       persistence.RegistryRepository
 	vectorizer Vectorizer
+	reranker   Reranker
 	now        func() time.Time
 }
 
 // New constructs a Service.
-func New(repo persistence.RegistryRepository, vectorizer Vectorizer) *Service {
+func New(repo persistence.RegistryRepository, vectorizer Vectorizer, reranker Reranker) *Service {
 	return &Service{
 		repo:       repo,
 		vectorizer: vectorizer,
+		reranker:   reranker,
 		now:        time.Now,
 	}
 }
@@ -210,10 +217,30 @@ func (s *Service) SearchTools(ctx context.Context, input SearchToolsInput) ([]do
 		limit = 5
 	}
 
-	tools, err := s.repo.SearchToolsByEmbedding(ctx, embedding, limit)
+	candidateLimit := limit * 3
+	if candidateLimit < limit {
+		candidateLimit = limit
+	}
+
+	tools, err := s.repo.SearchToolsByEmbedding(ctx, embedding, candidateLimit)
 	if err != nil {
 		return nil, fmt.Errorf("search tools: %w", err)
 	}
+
+	if s.reranker != nil && len(tools) > 0 {
+		ranked, err := s.reranker.Rank(ctx, description, tools)
+		if err != nil {
+			return nil, fmt.Errorf("rerank tools: %w", err)
+		}
+		if len(ranked) > 0 {
+			tools = ranked
+		}
+	}
+
+	if len(tools) > limit {
+		tools = tools[:limit]
+	}
+
 	return tools, nil
 }
 

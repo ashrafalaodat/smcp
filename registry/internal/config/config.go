@@ -24,6 +24,11 @@ type Config struct {
 	VectorizeAPIKey string `envconfig:"VECTORIZE_API_KEY"`
 	VectorizeModel  string `envconfig:"VECTORIZE_MODEL" default:"nomic-embed-text"`
 
+	RerankURL    string `envconfig:"RERANK_URL"`
+	RerankAPIKey string `envconfig:"RERANK_API_KEY"`
+	RerankModel  string `envconfig:"RERANK_MODEL" default:"rerank-english-v3.0"`
+	RerankTopN   int    `envconfig:"RERANK_TOP_N" default:"20"`
+
 	MetricsEnabled bool   `envconfig:"METRICS_ENABLED" default:"true"`
 	LogLevel       string `envconfig:"LOG_LEVEL" default:"info"`
 }

@@ -15,6 +15,7 @@ import (
 	httpapi "github.com/ashrafalaodat/registry/internal/api/http"
 	"github.com/ashrafalaodat/registry/internal/config"
 	"github.com/ashrafalaodat/registry/internal/persistence/postgres"
+	"github.com/ashrafalaodat/registry/internal/ranking"
 	"github.com/ashrafalaodat/registry/internal/service"
 	"github.com/ashrafalaodat/registry/internal/vectorizer"
 	"github.com/ashrafalaodat/registry/pkg/logging"
@@ -53,7 +54,17 @@ func main() {
 		logger.Warn("vectorizer URL not configured; embeddings will be empty")
 	}
 
-	svc := service.New(repo, vec)
+	var reranker service.Reranker
+	if cfg.RerankURL != "" {
+		reranker = ranking.NewClient(cfg.RerankURL, cfg.RerankAPIKey, cfg.RerankModel, cfg.RerankTopN)
+		if reranker == nil {
+			logger.Warn("rerank URL configured but client could not be created")
+		}
+	} else {
+		logger.Info("reranker URL not configured; falling back to vector distance ordering")
+	}
+
+	svc := service.New(repo, vec, reranker)
 	handler := httpapi.NewHandler(svc, logger)
 	router := httpapi.NewRouter(handler, cfg.MetricsEnabled)
 
