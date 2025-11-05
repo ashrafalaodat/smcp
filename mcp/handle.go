@@ -34,6 +34,10 @@ type registrySearchRequest struct {
 	Limit       int    `json:"limit,omitempty"`
 }
 
+type registryToolDetails struct {
+	Tool registryTool `json:"tool"`
+}
+
 type registryTool struct {
 	ID          string            `json:"id"`
 	Owner       string            `json:"owner"`
@@ -52,6 +56,21 @@ type searchResult struct {
 	Tools       []registryTool `json:"tools"`
 	MatchCount  int            `json:"match_count"`
 	RequestedAt time.Time      `json:"requested_at"`
+}
+
+type invokeArgs struct {
+	ToolID string         `json:"tool_id"`
+	Input  map[string]any `json:"input,omitempty"`
+}
+
+type invokeResult struct {
+	ToolID   string `json:"tool_id,omitempty"`
+	Name     string `json:"tool_name"`
+	Owner    string `json:"tool_owner"`
+	Endpoint string `json:"endpoint"`
+	Status   int    `json:"status"`
+	Result   any    `json:"result,omitempty"`
+	Raw      string `json:"raw,omitempty"`
 }
 
 var (
@@ -148,6 +167,33 @@ func initializeServer() error {
 
 	s.AddTool(tool, handler)
 
+	invokeToolDef := mcp.NewTool(
+		"invoke",
+		mcp.WithDescription("Invoke a discovered MCP tool using its registry tool_id."),
+		mcp.WithString(
+			"tool_id",
+			mcp.Description("Tool identifier from the MCP registry."),
+			mcp.Required(),
+			mcp.MinLength(1),
+		),
+		mcp.WithAny(
+			"input",
+			mcp.Description("Arbitrary JSON payload forwarded to the tool."),
+		),
+	)
+
+	invokeHandler := mcp.NewTypedToolHandler(func(ctx context.Context, _ mcp.CallToolRequest, args invokeArgs) (*mcp.CallToolResult, error) {
+		invokeRes, err := invokeRegistryTool(ctx, registryURL, args)
+		if err != nil {
+			return mcp.NewToolResultErrorFromErr("invoke tool failed", err), nil
+		}
+
+		summary := fmt.Sprintf("Invoked %s/%s via %s (status %d).", invokeRes.Owner, invokeRes.Name, invokeRes.Endpoint, invokeRes.Status)
+		return mcp.NewToolResultStructured(invokeRes, summary), nil
+	})
+
+	s.AddTool(invokeToolDef, invokeHandler)
+
 	// Stateless sessions simplify client integration with shared Knative instances.
 	mcpHTTPServer = server.NewStreamableHTTPServer(
 		s,
@@ -197,6 +243,144 @@ func callRegistrySearch(ctx context.Context, baseURL, description string, limit 
 	return tools, nil
 }
 
+func invokeRegistryTool(ctx context.Context, baseURL string, args invokeArgs) (invokeResult, error) {
+	toolID := strings.TrimSpace(args.ToolID)
+	if toolID == "" {
+		return invokeResult{}, fmt.Errorf("tool_id is required")
+	}
+
+	details, err := fetchRegistryTool(ctx, baseURL, toolID)
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("resolve tool by id: %w", err)
+	}
+
+	toolName := details.Tool.Name
+	toolOwner := details.Tool.Owner
+
+	endpoint, err := formatToolEndpoint(toolName, toolOwner)
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("derive endpoint: %w", err)
+	}
+
+	payload := map[string]any{
+		"input": map[string]any{},
+	}
+	if len(args.Input) > 0 {
+		payload["input"] = args.Input
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("encode invocation payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("build invocation request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("invoke request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return invokeResult{}, fmt.Errorf("read invoke response: %w", err)
+	}
+
+	result := invokeResult{
+		ToolID:   toolID,
+		Name:     toolName,
+		Owner:    toolOwner,
+		Endpoint: endpoint,
+		Status:   resp.StatusCode,
+	}
+
+	if len(data) == 0 {
+		return result, nil
+	}
+
+	if json.Valid(data) {
+		var parsed any
+		if err := json.Unmarshal(data, &parsed); err == nil {
+			result.Result = parsed
+			return result, nil
+		}
+	}
+
+	result.Raw = string(data)
+	return result, nil
+}
+
+func fetchRegistryTool(ctx context.Context, baseURL, toolID string) (registryToolDetails, error) {
+	endpoint := fmt.Sprintf("%s/v1/tools/%s", strings.TrimRight(baseURL, "/"), toolID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return registryToolDetails{}, fmt.Errorf("build registry request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return registryToolDetails{}, fmt.Errorf("registry request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return registryToolDetails{}, fmt.Errorf("read registry response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return registryToolDetails{}, fmt.Errorf("registry returned %d: %s", resp.StatusCode, strings.TrimSpace(string(data)))
+	}
+
+	var details registryToolDetails
+	if err := json.Unmarshal(data, &details); err != nil {
+		return registryToolDetails{}, fmt.Errorf("decode registry response: %w", err)
+	}
+	return details, nil
+}
+
+func formatToolEndpoint(name, owner string) (string, error) {
+	safeName := sanitizeSubdomain(name)
+	safeOwner := sanitizeSubdomain(owner)
+	if safeName == "" || safeOwner == "" {
+		return "", fmt.Errorf("cannot derive endpoint for name=%q owner=%q", name, owner)
+	}
+	return fmt.Sprintf("http://%s.%s.localhost", safeName, safeOwner), nil
+}
+
+func sanitizeSubdomain(input string) string {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input == "" {
+		return ""
+	}
+
+	var b strings.Builder
+	lastHyphen := false
+	for _, r := range input {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+			lastHyphen = false
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+			lastHyphen = false
+		case r == '-' || r == '_' || r == ' ' || r == '.' || r == '/':
+			if !lastHyphen {
+				b.WriteRune('-')
+				lastHyphen = true
+			}
+		default:
+			// skip unsupported characters
+		}
+	}
+
+	return strings.Trim(b.String(), "-")
+}
+
 func buildSummary(query string, tools []registryTool) string {
 	if len(tools) == 0 {
 		return fmt.Sprintf("No tools matched the description %q.", query)
@@ -205,11 +389,12 @@ func buildSummary(query string, tools []registryTool) string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("Found %d tool(s) for %q:\n", len(tools), query))
 	for i, tool := range tools {
+		description := shorten(tool.Description, 160)
 		b.WriteString(fmt.Sprintf("%d. %s (%s) — %s\n",
 			i+1,
 			fallback(tool.Name, "unnamed tool"),
 			fallback(tool.Owner, "unknown owner"),
-			shorten(tool.Description, 160),
+			description,
 		))
 	}
 	return strings.TrimRight(b.String(), "\n")
