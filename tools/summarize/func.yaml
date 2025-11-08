@@ -1,0 +1,16 @@
+specVersion: 0.35.0
+name: summarize
+runtime: go
+registry: local-registry:5000
+image: local-registry:5000/summarize:v1
+created: 2025-11-05T13:35:44.871399568+01:00
+build:
+  builder: pack
+run:
+  envs:
+  - name: OLLAMA_BASE_URL
+    value: http://ollama.mcp.svc.cluster.local:11434
+  - name: OLLAMA_MODEL
+    value: smollm:135m
+deploy:
+  namespace: mcp

@@ -1,0 +1,15 @@
+specVersion: 0.35.0
+name: math
+runtime: go
+registry: local-registry:5000
+image: local-registry:5000/math:v2
+created: 2025-11-05T16:44:32.260214771+01:00
+build:
+  builder: pack
+deploy:
+  namespace: default
+  annotations:
+    functions.mycorp.io/description: "Greets the caller in their preferred language."
+    functions.mycorp.io/inputs: '[{"name":"user","type":"string","required":true}]'
+    functions.mycorp.io/outputs: '[{"name":"greeting","type":"string"}]'
+
