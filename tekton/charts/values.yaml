@@ -1,0 +1,35 @@
+kubectl:
+  image: bitnami/kubectl:latest
+  imagePullPolicy: IfNotPresent
+  resources: {}
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+
+components:
+  pipelines:
+    enabled: true
+    url: https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
+    applyArgs: []
+    deleteArgs:
+      - --ignore-not-found=true
+  triggers:
+    enabled: true
+    url: https://storage.googleapis.com/tekton-releases/triggers/latest/release.yaml
+    applyArgs: []
+    deleteArgs:
+      - --ignore-not-found=true
+  dashboard:
+    enabled: false
+    url: https://storage.googleapis.com/tekton-releases/dashboard/latest/release.yaml
+    applyArgs: []
+    deleteArgs:
+      - --ignore-not-found=true
+
+job:
+  backoffLimit: 1
+  ttlSecondsAfterFinished: 300

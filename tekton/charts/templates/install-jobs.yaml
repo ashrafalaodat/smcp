@@ -1,0 +1,47 @@
+{{- $root := . -}}
+{{- $components := list "pipelines" "triggers" "dashboard" -}}
+{{- range $name := $components }}
+{{- $cfg := index $root.Values.components $name | default dict -}}
+{{- if and $cfg $cfg.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "tekton.componentJobName" (dict "root" $root "component" $name "suffix" "install") }}
+  labels:
+    {{- include "tekton.labels" $root | nindent 4 }}
+    tekton.dev/component: {{ $name }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "1"
+    "helm.sh/hook-delete-policy": hook-succeeded
+spec:
+  backoffLimit: {{ default 1 $root.Values.job.backoffLimit }}
+{{- with $root.Values.job.ttlSecondsAfterFinished }}
+  ttlSecondsAfterFinished: {{ . }}
+{{- end }}
+  template:
+    metadata:
+      labels:
+        {{- include "tekton.selectorLabels" $root | nindent 8 }}
+        tekton.dev/component: {{ $name }}
+    spec:
+      serviceAccountName: {{ include "tekton.serviceAccountName" $root }}
+      restartPolicy: Never
+      containers:
+        - name: install
+          image: {{ $root.Values.kubectl.image }}
+          imagePullPolicy: {{ $root.Values.kubectl.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              echo "[tekton] Applying {{ $name }} from {{ $cfg.url }}"
+              kubectl apply{{- range $arg := $cfg.applyArgs | default list }} {{ $arg }}{{- end }} -f {{ $cfg.url | quote }}
+{{- with $root.Values.kubectl.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+{{- end }}
+---
+{{- end }}
+{{- end }}
