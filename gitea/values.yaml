@@ -1,0 +1,68 @@
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 1
+
+image:
+  repository: gitea/gitea
+  tag: 1.25.1-rootless
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  httpPort: 3000
+  sshPort: 2222
+  annotations: {}
+
+resources: {}
+
+persistence:
+  enabled: true
+  size: 10Gi
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: gitea.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+env:
+  ROOT_URL: ""
+  SSH_DOMAIN: ""
+  SSH_PORT: 22
+  DISABLE_REGISTRATION: true
+  DB_TYPE: sqlite3
+  DB_HOST: ""
+  DB_NAME: ""
+  DB_USER: ""
+  DB_PASSWD: ""
+
+features:
+  actions: false
+  wiki: false
+  issues: false
+  pulls: false
+  projects: false
+  packages: false
+  activities: false
+
+existingSecret: ""
+
+additionalEnv: []
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}

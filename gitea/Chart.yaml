@@ -1,0 +1,16 @@
+apiVersion: v2
+name: gitea
+version: 0.2.0
+appVersion: "1.25.1"
+description: Lightweight Helm chart to deploy Gitea with persistent storage.
+type: application
+keywords:
+  - gitea
+  - git
+  - scm
+home: https://about.gitea.com
+sources:
+  - https://github.com/go-gitea/gitea
+maintainers:
+  - name: smcp-maintainers
+    email: devnull@example.com

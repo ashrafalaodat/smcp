@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "gitea.fullname" . }}
+  labels:
+    {{- include "gitea.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "gitea.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "gitea.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "gitea.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "gitea.serviceAccountName" . }}
+      containers:
+        - name: gitea
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+            - name: ssh
+              containerPort: 22
+          env:
+            - name: GITEA_APP_INI
+              value: /data/gitea/conf/app.ini
+            - name: GITEA__server__ROOT_URL
+              value: {{ default (printf "http://%s:%d/" (include "gitea.fullname" .) (int .Values.service.httpPort)) .Values.env.ROOT_URL | quote }}
+            - name: GITEA__server__SSH_DOMAIN
+              value: {{ .Values.env.SSH_DOMAIN | default (printf "%s-ssh" (include "gitea.fullname" .)) | quote }}
+            - name: GITEA__server__SSH_PORT
+              value: "{{ .Values.env.SSH_PORT }}"
+            - name: GITEA__database__DB_TYPE
+              value: {{ .Values.env.DB_TYPE | quote }}
+            - name: GITEA__database__HOST
+              value: {{ .Values.env.DB_HOST | quote }}
+            - name: GITEA__database__NAME
+              value: {{ .Values.env.DB_NAME | quote }}
+            - name: GITEA__database__USER
+              value: {{ .Values.env.DB_USER | quote }}
+            - name: GITEA_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (printf "%s-db" (include "gitea.fullname" .)) .Values.existingSecret }}
+                  key: db-password
+            - name: GITEA__actions__ENABLED
+              value: {{ ternary "true" "false" .Values.features.actions | quote }}
+            - name: GITEA__repository__DEFAULT_ENABLE_WIKI
+              value: {{ ternary "true" "false" .Values.features.wiki | quote }}
+            - name: GITEA__repository__DEFAULT_ENABLE_ISSUES
+              value: {{ ternary "true" "false" .Values.features.issues | quote }}
+            - name: GITEA__repository__DEFAULT_ENABLE_PULLS
+              value: {{ ternary "true" "false" .Values.features.pulls | quote }}
+            - name: GITEA__repository__DEFAULT_ENABLE_PROJECTS
+              value: {{ ternary "true" "false" .Values.features.projects | quote }}
+            - name: GITEA__repository__ENABLE_PUSH_CREATE_USER
+              value: "false"
+            - name: GITEA__repository__ENABLE_PUSH_CREATE_ORG
+              value: "false"
+            - name: GITEA__packages__ENABLED
+              value: {{ ternary "true" "false" .Values.features.packages | quote }}
+            - name: GITEA__activitypub__ENABLED
+              value: {{ ternary "true" "false" .Values.features.activities | quote }}
+{{- with .Values.additionalEnv }}
+{{ toYaml . | nindent 12 }}
+{{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/gitea/conf
+            - name: data
+              mountPath: /data
+{{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+{{- end }}
+{{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+{{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+{{- end }}
+      volumes:
+        - name: config
+          emptyDir: {}
+{{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+{{- end }}
+{{- if .Values.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+{{- if .Values.persistence.storageClassName }}
+        storageClassName: {{ .Values.persistence.storageClassName }}
+{{- end }}
+{{- end }}

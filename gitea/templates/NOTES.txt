@@ -1,0 +1,14 @@
+Gitea has been deployed.
+
+1. Get the application URL by running these commands:
+{{- if .Values.ingress.enabled }}
+  echo "https://{{ (index .Values.ingress.hosts 0).host }}"
+{{- else if contains "LoadBalancer" .Values.service.type }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "gitea.fullname" . }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+  echo "http://$SERVICE_IP:{{ .Values.service.httpPort }}"
+{{- else }}
+  kubectl port-forward svc/{{ include "gitea.fullname" . }} 8080:{{ .Values.service.httpPort }}
+  echo "http://localhost:8080"
+{{- end }}
+
+2. Default admin user must be created manually via the UI or CLI.
