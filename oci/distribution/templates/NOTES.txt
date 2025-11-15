@@ -1,0 +1,26 @@
+The OCI Distribution registry is now running.
+
+1. Reach the API:
+{{- if .Values.ingress.enabled }}
+   Ingress hosts:
+{{- range .Values.ingress.hosts }}
+     - http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else if or (eq .Values.service.type "LoadBalancer") (eq .Values.service.type "NodePort") }}
+   Run:
+     kubectl --namespace {{ .Release.Namespace }} get svc {{ include "distribution.fullname" . }}
+   and use the published address/port ({{ .Values.service.port }}) from that Service.
+{{- else }}
+   Port-forward the Service locally:
+     kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "distribution.fullname" . }} 5000:{{ .Values.service.port }}
+   Then push images to http://127.0.0.1:5000 .
+{{- end }}
+
+2. Test the v2 API:
+   curl -I http://ADDRESS:{{ .Values.service.port }}/v2/
+
+{{- if .Values.auth.htpasswd.enabled }}
+Basic authentication is enabled. Use one of the htpasswd entries from values.yaml (or the provided secret) when running `docker login`.
+{{- else }}
+Authentication is disabled by default. Consider enabling `.Values.auth.htpasswd.enabled` before exposing the registry publicly.
+{{- end }}

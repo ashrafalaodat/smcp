@@ -1,0 +1,181 @@
+replicaCount: 1
+
+image:
+  repository: registry
+  tag: "3.0.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+  automount: true
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  runAsNonRoot: true
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+priorityClassName: ""
+hostAliases: []
+topologySpreadConstraints: []
+
+service:
+  type: ClusterIP
+  port: 5000
+  nodePort: ""
+  annotations: {}
+  labels: {}
+  loadBalancerIP: ""
+  externalTrafficPolicy: Cluster
+
+resources:
+  limits: {}
+  requests:
+    cpu: 50m
+    memory: 256Mi
+
+livenessProbe:
+  enabled: true
+  tcpSocket:
+    port: registry
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 1
+  failureThreshold: 3
+  successThreshold: 1
+
+readinessProbe:
+  enabled: true
+  tcpSocket:
+    port: registry
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 1
+  failureThreshold: 3
+  successThreshold: 1
+
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  additionalLabels: {}
+  honorLabels: false
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: registry.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []
+extraEnvFrom: []
+extraArgs: []
+command: []
+extraVolumeMounts: []
+extraVolumes: []
+initContainers: []
+sidecars: []
+
+httpSecret:
+  value: ""
+  existingSecret: ""
+  existingSecretKey: http-secret
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: ""
+  size: 20Gi
+  accessModes:
+    - ReadWriteOnce
+  annotations: {}
+  selector: {}
+  subPath: ""
+  mountPath: /var/lib/registry
+
+registryConfig:
+  existingSecret: ""
+  secretKey: config.yml
+  mountPath: /etc/docker/registry
+  data: |
+    version: 0.1
+    log:
+      fields:
+        service: registry
+    storage:
+      cache:
+        blobdescriptor: inmemory
+      filesystem:
+        rootdirectory: /var/lib/registry
+      maintenance:
+        uploadpurging:
+          enabled: true
+          age: 168h
+          interval: 24h
+          dryrun: false
+    http:
+      addr: :5000
+      headers:
+        X-Content-Type-Options: [nosniff]
+    health:
+      storagedriver:
+        enabled: true
+        interval: 10s
+        threshold: 3
+
+auth:
+  htpasswd:
+    enabled: true
+    existingSecret: ""
+    mountPath: /etc/docker/registry
+    filename: htpasswd
+    entries:
+      - username: oci
+        password: "JQdMvN43Qkfo9IoFOTHW94"
+        passwordHash: "$2y$10$cxtVzmVpu2WY7yHiJ0p2f.7NwsqH/ocIJhLoxJpuYXFv/ABhwr7wm"
+
+logs:
+  level: info
+  format: text
+
+metrics:
+  enabled: false
+  port: 5001
+  path: /metrics
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  maxUnavailable: ""

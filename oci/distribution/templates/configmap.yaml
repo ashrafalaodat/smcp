@@ -1,0 +1,11 @@
+{{- if not .Values.registryConfig.existingSecret }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "distribution.configName" . }}
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+data:
+  {{ .Values.registryConfig.secretKey }}: |
+{{ tpl .Values.registryConfig.data . | indent 4 }}
+{{- end }}

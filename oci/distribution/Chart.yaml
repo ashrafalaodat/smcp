@@ -1,0 +1,16 @@
+apiVersion: v2
+name: distribution
+description: Helm chart for the OCI Distribution reference registry (registry:2)
+type: application
+version: 0.1.0
+appVersion: "2.8.3"
+home: https://github.com/distribution/distribution
+sources:
+  - https://github.com/distribution/distribution
+  - https://github.com/distribution/distribution/blob/main/cmd/registry/config-example.yml
+keywords:
+  - container-registry
+  - oci
+  - distribution
+  - docker-registry
+dependencies: []

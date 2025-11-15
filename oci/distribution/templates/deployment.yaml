@@ -1,0 +1,181 @@
+{{- $root := . -}}
+{{- $configDir := trimSuffix "/" .Values.registryConfig.mountPath -}}
+{{- $htpasswdDir := trimSuffix "/" .Values.auth.htpasswd.mountPath -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "distribution.fullname" . }}
+  labels:
+    {{- include "distribution.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "distribution.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "distribution.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "distribution.serviceAccountName" . }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- if .Values.command }}
+          command:
+            {{- toYaml .Values.command | nindent 12 }}
+          {{- end }}
+          {{- if .Values.extraArgs }}
+          args:
+            {{- toYaml .Values.extraArgs | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: registry
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+            {{- end }}
+          {{- if .Values.livenessProbe.enabled }}
+          livenessProbe:
+            {{- toYaml (omit .Values.livenessProbe "enabled") | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+            {{- toYaml (omit .Values.readinessProbe "enabled") | nindent 12 }}
+          {{- end }}
+          env:
+            - name: REGISTRY_LOG_LEVEL
+              value: {{ .Values.logs.level | default "info" | quote }}
+            - name: REGISTRY_LOG_FORMAT
+              value: {{ .Values.logs.format | default "text" | quote }}
+            {{- if .Values.httpSecret.existingSecret }}
+            - name: REGISTRY_HTTP_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.httpSecret.existingSecret }}
+                  key: {{ .Values.httpSecret.existingSecretKey }}
+            {{- else if .Values.httpSecret.value }}
+            - name: REGISTRY_HTTP_SECRET
+              value: {{ .Values.httpSecret.value | quote }}
+            {{- end }}
+            {{- with .Values.extraEnv }}
+{{ tpl (toYaml .) $root | indent 12 }}
+            {{- end }}
+          {{- with .Values.extraEnvFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: registry-storage
+              mountPath: {{ .Values.persistence.mountPath }}
+              {{- if .Values.persistence.subPath }}
+              subPath: {{ .Values.persistence.subPath }}
+              {{- end }}
+            - name: registry-config
+              mountPath: {{ printf "%s/%s" $configDir .Values.registryConfig.secretKey }}
+              subPath: {{ .Values.registryConfig.secretKey }}
+              readOnly: true
+            {{- if .Values.auth.htpasswd.enabled }}
+            - name: registry-htpasswd
+              mountPath: {{ printf "%s/%s" $htpasswdDir .Values.auth.htpasswd.filename }}
+              subPath: {{ .Values.auth.htpasswd.filename }}
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+        {{- with .Values.sidecars }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      volumes:
+        - name: registry-config
+          {{- if .Values.registryConfig.existingSecret }}
+          secret:
+            secretName: {{ .Values.registryConfig.existingSecret }}
+            items:
+              - key: {{ .Values.registryConfig.secretKey }}
+                path: {{ .Values.registryConfig.secretKey }}
+          {{- else }}
+          configMap:
+            name: {{ include "distribution.configName" . }}
+            items:
+              - key: {{ .Values.registryConfig.secretKey }}
+                path: {{ .Values.registryConfig.secretKey }}
+          {{- end }}
+        - name: registry-storage
+          {{- if .Values.persistence.enabled }}
+            {{- if .Values.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim }}
+            {{- else }}
+          persistentVolumeClaim:
+            claimName: {{ include "distribution.pvcName" . }}
+            {{- end }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- if .Values.auth.htpasswd.enabled }}
+        - name: registry-htpasswd
+          secret:
+            {{- if .Values.auth.htpasswd.existingSecret }}
+            secretName: {{ .Values.auth.htpasswd.existingSecret }}
+            {{- else }}
+            secretName: {{ include "distribution.htpasswdSecretName" . }}
+            {{- end }}
+            items:
+              - key: {{ .Values.auth.htpasswd.filename }}
+                path: {{ .Values.auth.htpasswd.filename }}
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
