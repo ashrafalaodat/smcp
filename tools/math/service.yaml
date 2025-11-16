@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: user-container
-          image: local-registry:5000/math@sha256:<digest>
+          image: 10.96.27.199:5000/math:0000000-0 # {"$imagepolicy": "flux-system:math-policy"}
           securityContext:
             runAsNonRoot: true
             allowPrivilegeEscalation: false
@@ -31,3 +31,5 @@ spec:
             httpGet: { path: /health/readiness, port: 0 }
           livenessProbe:
             httpGet: { path: /health/liveness, port: 0 }
+      imagePullSecrets:
+        - name: oci-registry-distribution-dockerconfig

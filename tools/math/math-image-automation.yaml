@@ -1,0 +1,51 @@
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: math-repo
+  namespace: flux-system
+spec:
+  image: 10.96.27.199:5000/math
+  interval: 1m
+  secretRef:
+    name: oci-registry-distribution-dockerconfig
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImagePolicy
+metadata:
+  name: math-policy
+  namespace: flux-system
+spec:
+  imageRepositoryRef:
+    name: math-repo
+  filterTags:
+    pattern: '^(?P<sha>[0-9a-f]{7})-(?P<ts>\d+)$'
+    extract: '$ts'
+  policy:
+    numerical:
+      order: asc
+---
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: math
+  namespace: flux-system
+spec:
+  interval: 1m
+  sourceRef:
+    kind: GitRepository
+    name: git-math
+  git:
+    checkout:
+      ref:
+        branch: deployment
+    commit:
+      author:
+        email: flux-bot@example.com
+        name: flux-bot
+      messageTemplate: "chore(math): automated image update"
+    push:
+      branch: deployment
+  update:
+    path: .
+    strategy: Setters

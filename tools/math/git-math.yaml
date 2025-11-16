@@ -1,0 +1,13 @@
+---
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: git-math
+  namespace: flux-system
+spec:
+  interval: 1m0s
+  ref:
+    branch: deployment
+  secretRef:
+    name: flux-gitea-auth
+  url: http://gitea-gitea.gitea.svc.cluster.local:3000/gitea-admin/math.git
