@@ -9,7 +9,7 @@ data:
 
     # The Tekton pipeline pre-builds the Go binary as ./func when no
     # Dockerfile is present in the repository. We simply copy it here.
-    COPY func /func
+    COPY --chown=nonroot:nonroot --chmod=0755 func /func
 
     USER nonroot:nonroot
     ENTRYPOINT ["/func"]

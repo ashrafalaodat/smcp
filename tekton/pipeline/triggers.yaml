@@ -2,15 +2,13 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: tekton-triggers
-  namespace: tekton-pipelines
-secrets:
-  - name: registry-credentials
+  namespace: oci
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: tekton-triggers
-  namespace: tekton-pipelines
+  namespace: oci
 rules:
   - apiGroups: ["tekton.dev"]
     resources: ["pipelineruns", "taskruns"]
@@ -19,127 +17,122 @@ rules:
     resources: ["pipelineruns/status"]
     verbs: ["get"]
   - apiGroups: ["triggers.tekton.dev"]
-    resources: ["eventlisteners", "triggertemplates", "triggerbindings"]
+    resources: ["eventlisteners", "triggertemplates", "triggerbindings", "triggers", "interceptors"]
     verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["configmaps", "secrets"]
     verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["impersonate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: tekton-triggers-oci
+rules:
+  - apiGroups: ["triggers.tekton.dev"]
+    resources: ["clusterinterceptors", "clustertriggerbindings"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: tekton-triggers
-  namespace: tekton-pipelines
+  namespace: oci
 subjects:
   - kind: ServiceAccount
     name: tekton-triggers
-    namespace: tekton-pipelines
+    namespace: oci
 roleRef:
   kind: Role
   name: tekton-triggers
   apiGroup: rbac.authorization.k8s.io
 ---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: tekton-triggers-oci
+subjects:
+  - kind: ServiceAccount
+    name: tekton-triggers
+    namespace: oci
+roleRef:
+  kind: ClusterRole
+  name: tekton-triggers-oci
+  apiGroup: rbac.authorization.k8s.io
+---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerBinding
 metadata:
-  name: github-push-main
-  namespace: tekton-pipelines
+  name: gitea-push-main
+  namespace: oci
 spec:
   params:
-    - name: repoUrl
-      value: $(body.repository.clone_url)
-    - name: revision
-      value: $(extensions.branch)
+    - name: repoName
+      value: $(body.repository.name)
     - name: imageTag
-      value: $(extensions.shortSha)
+      value: $(extensions.shortSha)-$(extensions.timestamp)
 ---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerTemplate
 metadata:
   name: git-image-build-template
-  namespace: tekton-pipelines
+  namespace: oci
 spec:
   params:
-    - name: repoUrl
-    - name: revision
-    - name: imageRepository
+    - name: repoName
     - name: imageTag
-    - name: dockerfile
-      default: Dockerfile
-    - name: contextPath
-      default: .
   resourcetemplates:
     - apiVersion: tekton.dev/v1
       kind: PipelineRun
       metadata:
         generateName: git-image-build-
       spec:
-        serviceAccountName: tekton-image-builder
+        taskRunTemplate:
+          serviceAccountName: tekton-image-builder
         pipelineRef:
           name: git-image-build
         params:
-          - name: repo_url
-            value: $(tt.params.repoUrl)
-          - name: revision
-            value: $(tt.params.revision)
-          - name: image_url
-            value: $(tt.params.imageRepository):$(tt.params.imageTag)
-          - name: dockerfile
-            value: $(tt.params.dockerfile)
-          - name: context_path
-            value: $(tt.params.contextPath)
+          - name: repo_name
+            value: $(tt.params.repoName)
+          - name: image_tag
+            value: $(tt.params.imageTag)
         workspaces:
           - name: source
             emptyDir: {}
           - name: dockerconfig
             secret:
-              secretName: registry-credentials
+              secretName: oci-registry-distribution-dockerconfig
 ---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
-  name: github-image-listener
-  namespace: tekton-pipelines
+  name: gitea-image-listener
+  namespace: oci
 spec:
   serviceAccountName: tekton-triggers
   resources:
     kubernetesResource:
       serviceType: ClusterIP
   triggers:
-    - name: github-main-image-build
+    - name: gitea-main-image-build
       serviceAccountName: tekton-triggers
       interceptors:
-        - ref:
-            kind: ClusterInterceptor
-            name: github
-          params:
-            - name: secretRef
-              value:
-                secretName: github-webhook-secret
-                secretKey: secretToken
-            - name: eventTypes
-              value:
-                - push
         - ref:
             kind: ClusterInterceptor
             name: cel
           params:
             - name: filter
-              value: "body.ref == 'refs/heads/main'"
+              value: |
+                body.ref == 'refs/heads/main' && body.repository.clone_url == 'http://gitea-gitea:3000/gitea-admin/math.git'
             - name: overlays
               value:
-                - key: branch
-                  expression: "split(body.ref, '/')[2]"
                 - key: shortSha
-                  expression: "body.after.substring(0,7)"
+                  expression: body.after.substring(0,7)
+                - key: timestamp
+                  expression: body.head_commit.timestamp.replace("-", "").replace(":", "").replace("T", "").replace("Z", "")
       bindings:
-        - ref: github-push-main
+        - ref: gitea-push-main
       template:
         ref: git-image-build-template
-      params:
-        - name: imageRepository
-          value: ghcr.io/example-org/sample-app
-        - name: dockerfile
-          value: Dockerfile
-        - name: contextPath
-          value: .

@@ -2,26 +2,31 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: tekton-image-builder
-  namespace: tekton-pipelines
-secrets:
-  - name: registry-credentials
+  namespace: oci
 ---
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
   name: git-image-build
-  namespace: tekton-pipelines
+  namespace: oci
 spec:
   description: |
     Clones a git repository and builds/pushes a container image with Kaniko.
   params:
     - name: repo_url
       description: Git repository to clone
+      default: http://gitea-gitea.gitea.svc.cluster.local:3000/gitea-admin/math.git
     - name: revision
       description: Git ref (branch, tag, or SHA)
       default: main
-    - name: image_url
-      description: Fully-qualified image (registry.example.com/app:tag)
+    - name: repo_name
+      description: Repository name (used for image path)
+      default: math
+    - name: image_tag
+      description: Image tag (e.g., short commit SHA)
+    - name: registry_host
+      description: Registry host:port (no scheme)
+      default: oci-registry-distribution.oci.svc.cluster.local:5000
     - name: dockerfile
       description: Relative path to the Dockerfile within the repo
       default: Dockerfile
@@ -32,25 +37,45 @@ spec:
     - name: source
       description: Holds the cloned repository
     - name: dockerconfig
-      description: Contains a dockerconfigjson secret for Kaniko pushes
+      description: Contains a docker config JSON secret for registry auth
   tasks:
-    - name: fetch-source
+    - name: build-and-push
       params:
         - name: repo_url
           value: $(params.repo_url)
         - name: revision
           value: $(params.revision)
+        - name: repo_name
+          value: $(params.repo_name)
+        - name: image_tag
+          value: $(params.image_tag)
+        - name: dockerfile
+          value: $(params.dockerfile)
+        - name: context_path
+          value: $(params.context_path)
+        - name: registry_host
+          value: $(params.registry_host)
       workspaces:
         - name: source
           workspace: source
+        - name: dockerconfig
+          workspace: dockerconfig
       taskSpec:
         params:
           - name: repo_url
-            description: Git repository to clone
           - name: revision
-            description: Git reference to checkout
+          - name: repo_name
+          - name: image_tag
+          - name: dockerfile
+          - name: context_path
+          - name: registry_host
         workspaces:
           - name: source
+          - name: dockerconfig
+        volumes:
+          - name: knative-dockerfiles
+            configMap:
+              name: knative-dockerfiles
         steps:
           - name: clone
             image: alpine/git:2.45.2
@@ -61,39 +86,110 @@ spec:
               git clone --depth 1 --branch "$(params.revision)" "$(params.repo_url)" "$(workspaces.source.path)/src"
               cd "$(workspaces.source.path)/src"
               git rev-parse HEAD
-    - name: build-and-push
-      runAfter:
-        - fetch-source
-      params:
-        - name: image_url
-          value: $(params.image_url)
-        - name: dockerfile
-          value: $(params.dockerfile)
-        - name: context_path
-          value: $(params.context_path)
-      workspaces:
-        - name: source
-          workspace: source
-        - name: dockerconfig
-          workspace: dockerconfig
-      taskSpec:
-        params:
-          - name: image_url
-          - name: dockerfile
-          - name: context_path
-        workspaces:
-          - name: source
-          - name: dockerconfig
-        steps:
+              echo "[tekton] contents of $(workspaces.source.path):"
+              ls -a "$(workspaces.source.path)"
+              echo "[tekton] contents of $(workspaces.source.path)/src:"
+              ls -a "$(workspaces.source.path)/src"
+          - name: ensure-dockerfile
+            image: alpine:3.20.3
+            volumeMounts:
+              - name: knative-dockerfiles
+                mountPath: /knative-dockerfiles
+            script: |
+              #!/bin/sh
+              set -eu
+              CONTEXT_DIR="$(workspaces.source.path)/src/$(params.context_path)"
+              TARGET_DOCKERFILE="${CONTEXT_DIR}/$(params.dockerfile)"
+              mkdir -p "$CONTEXT_DIR"
+              echo "[tekton] Listing contents of $CONTEXT_DIR"
+              ls -a "$CONTEXT_DIR"
+              if [ -f "$TARGET_DOCKERFILE" ]; then
+                echo "[tekton] Found repository Dockerfile at $TARGET_DOCKERFILE"
+                rm -f "$(workspaces.source.path)/src/.uses-fallback"
+                exit 0
+              fi
+              echo "[tekton] Repository missing $(params.dockerfile); using fallback Dockerfile-go"
+              cp /knative-dockerfiles/Dockerfile-go "$TARGET_DOCKERFILE"
+              touch "$(workspaces.source.path)/src/.uses-fallback"
+          - name: build-go-binary
+            image: golang:1.22
+            script: |
+              #!/bin/sh
+              set -eu
+              CONTEXT_DIR="$(workspaces.source.path)/src/$(params.context_path)"
+              if [ ! -f "$(workspaces.source.path)/src/.uses-fallback" ]; then
+                echo "[tekton] Repository provides a Dockerfile; skipping fallback Go build"
+                exit 0
+              fi
+              cd "$CONTEXT_DIR"
+              if [ ! -f go.mod ]; then
+                echo "[tekton] Missing go.mod; cannot use fallback Dockerfile" >&2
+                exit 1
+              fi
+              MODULE=$(awk '/^module /{print $2; exit}' go.mod)
+              if [ -z "$MODULE" ]; then
+                echo "[tekton] Unable to determine module path from go.mod" >&2
+                exit 1
+              fi
+              BOOTSTRAP_DIR="$CONTEXT_DIR/.tekton-bootstrap"
+              mkdir -p "$BOOTSTRAP_DIR"
+              cat <<MAIN > "$BOOTSTRAP_DIR/main.go"
+              package main
+
+              import (
+                "context"
+                "net/http"
+                "os"
+
+                fn "$MODULE"
+              )
+
+              func main() {
+                http.HandleFunc("/health/liveness", func(w http.ResponseWriter, r *http.Request) {
+                  w.WriteHeader(http.StatusOK)
+                  _, _ = w.Write([]byte("ok"))
+                })
+                http.HandleFunc("/health/readiness", func(w http.ResponseWriter, r *http.Request) {
+                  w.WriteHeader(http.StatusOK)
+                  _, _ = w.Write([]byte("ready"))
+                })
+                handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                  fn.Handle(context.Background(), w, r)
+                })
+                http.Handle("/", handler)
+                port := os.Getenv("PORT")
+                if port == "" {
+                  port = "8080"
+                }
+                if err := http.ListenAndServe(":"+port, nil); err != nil {
+                  panic(err)
+                }
+              }
+              MAIN
+              GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o "$CONTEXT_DIR/func" "$BOOTSTRAP_DIR"
+              rm -rf "$BOOTSTRAP_DIR"
+              chmod +x "$CONTEXT_DIR/func"
+          - name: setup-dockerconfig
+            image: alpine:3.20.3
+            script: |
+              #!/bin/sh
+              set -eu
+              mkdir -p /tekton/home/.docker
+              cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" /tekton/home/.docker/config.json
           - name: build
             image: gcr.io/kaniko-project/executor:v1.23.2
             env:
               - name: DOCKER_CONFIG
-                value: $(workspaces.dockerconfig.path)
+                value: /tekton/home/.docker
+            command:
+              - /kaniko/executor
             args:
               - --context=$(workspaces.source.path)/src/$(params.context_path)
               - --dockerfile=$(workspaces.source.path)/src/$(params.dockerfile)
-              - --destination=$(params.image_url)
+              - --destination=$(params.registry_host)/$(params.repo_name):$(params.image_tag)
+              - --skip-tls-verify
+              - --insecure
               - --snapshotMode=redo
               - --push-retry=3
               - --use-new-run
+              - --cleanup=false

@@ -57,3 +57,7 @@ The hook jobs run with a dedicated service account plus a high-privilege Cluster
 `helm uninstall tekton --namespace tekton`
 
 The chart's pre-delete hooks will stream the same upstream bundles through `kubectl delete --ignore-not-found`, so Tekton CRDs, RBAC, and deployments are cleaned up before Helm removes the helper jobs.
+
+## PipelineRun retention
+
+`tekton/cleanup/prune-pipelineruns.yaml` installs a CronJob (`tekton-prune-pipelineruns`) in the `oci` namespace. It runs hourly and deletes PipelineRuns whose `completionTime` is older than 24 hours, ensuring only the last day's runs remain. Adjust the cron schedule or the `86400`-second window inside the manifest if you need a different retention period.
