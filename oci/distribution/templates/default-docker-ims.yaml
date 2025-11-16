@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: knative-dockerfiles
+  namespace: oci
+data:
+  Dockerfile-go: |
+    FROM gcr.io/distroless/static:nonroot
+
+    # The Tekton pipeline pre-builds the Go binary as ./func when no
+    # Dockerfile is present in the repository. We simply copy it here.
+    COPY func /func
+
+    USER nonroot:nonroot
+    ENTRYPOINT ["/func"]

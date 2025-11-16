@@ -166,6 +166,15 @@ auth:
         password: "JQdMvN43Qkfo9IoFOTHW94"
         passwordHash: "$2y$10$cxtVzmVpu2WY7yHiJ0p2f.7NwsqH/ocIJhLoxJpuYXFv/ABhwr7wm"
 
+registryCredentials:
+  enabled: true
+  existingSecret: ""
+  secretName: ""
+  server: ""
+  email: ""
+  annotations: {}
+  labels: {}
+
 logs:
   level: info
   format: text
