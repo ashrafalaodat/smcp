@@ -3,6 +3,7 @@ set -euo pipefail
 
 REG_NAME=${REG_NAME:-local-registry}
 REG_PORT=${REG_PORT:-5000}
+OCI_REG_HOST=${OCI_REG_HOST:-oci-registry-distribution.oci.svc.cluster.local}
 CLUSTER_NAME=${CLUSTER_NAME:-nvkind-kgwkg}
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CONFIG_FILE=${CONFIG_FILE:-"${ROOT_DIR}/kind-local-registry.yaml"}
@@ -18,6 +19,10 @@ server = "http://${REG_NAME}:${REG_PORT}"
 
 [host."http://${REG_NAME}:${REG_PORT}"]
   capabilities = ["pull", "resolve", "push"]
+  skip_verify = true
+
+[host."http://${OCI_REG_HOST}:5000"]
+  capabilities = ["pull", "resolve"]
   skip_verify = true
 HOSTS
 
