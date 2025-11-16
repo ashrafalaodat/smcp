@@ -26,48 +26,39 @@ spec:
             - name: ssh
               containerPort: 22
           env:
-            - name: GITEA_APP_INI
-              value: /data/gitea/conf/app.ini
-            - name: GITEA__server__ROOT_URL
-              value: {{ default (printf "http://%s:%d/" (include "gitea.fullname" .) (int .Values.service.httpPort)) .Values.env.ROOT_URL | quote }}
-            - name: GITEA__server__SSH_DOMAIN
-              value: {{ .Values.env.SSH_DOMAIN | default (printf "%s-ssh" (include "gitea.fullname" .)) | quote }}
-            - name: GITEA__server__SSH_PORT
-              value: "{{ .Values.env.SSH_PORT }}"
-            - name: GITEA__database__DB_TYPE
-              value: {{ .Values.env.DB_TYPE | quote }}
-            - name: GITEA__database__HOST
-              value: {{ .Values.env.DB_HOST | quote }}
-            - name: GITEA__database__NAME
-              value: {{ .Values.env.DB_NAME | quote }}
-            - name: GITEA__database__USER
-              value: {{ .Values.env.DB_USER | quote }}
-            - name: GITEA_DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ default (printf "%s-db" (include "gitea.fullname" .)) .Values.existingSecret }}
-                  key: db-password
-            - name: GITEA__actions__ENABLED
-              value: {{ ternary "true" "false" .Values.features.actions | quote }}
-            - name: GITEA__repository__DEFAULT_ENABLE_WIKI
-              value: {{ ternary "true" "false" .Values.features.wiki | quote }}
-            - name: GITEA__repository__DEFAULT_ENABLE_ISSUES
-              value: {{ ternary "true" "false" .Values.features.issues | quote }}
-            - name: GITEA__repository__DEFAULT_ENABLE_PULLS
-              value: {{ ternary "true" "false" .Values.features.pulls | quote }}
-            - name: GITEA__repository__DEFAULT_ENABLE_PROJECTS
-              value: {{ ternary "true" "false" .Values.features.projects | quote }}
-            - name: GITEA__repository__ENABLE_PUSH_CREATE_USER
-              value: "false"
-            - name: GITEA__repository__ENABLE_PUSH_CREATE_ORG
-              value: "false"
-            - name: GITEA__packages__ENABLED
-              value: {{ ternary "true" "false" .Values.features.packages | quote }}
-            - name: GITEA__activitypub__ENABLED
-              value: {{ ternary "true" "false" .Values.features.activities | quote }}
-{{- with .Values.additionalEnv }}
-{{ toYaml . | nindent 12 }}
-{{- end }}
+{{ include "gitea.env" . | nindent 12 }}
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    set -euo pipefail
+                    CONFIG="${GITEA_APP_INI:-/data/gitea/conf/app.ini}"
+                    i=0
+                    while [ $i -lt 60 ]; do
+                      if [ -f "$CONFIG" ]; then
+                        break
+                      fi
+                      i=$((i+1))
+                      sleep 2
+                    done
+                    if [ ! -f "$CONFIG" ]; then
+                      echo "Gitea config $CONFIG not found" >&2
+                      exit 1
+                    fi
+                    i=0
+                    while [ $i -lt 60 ]; do
+                      if gitea admin user list --config "$CONFIG" >/tmp/gitea-users 2>&1; then
+                        break
+                      fi
+                      i=$((i+1))
+                      sleep 2
+                    done
+                    if ! gitea admin user change-password --username "$GITEA_ADMIN_USERNAME" --password "$GITEA_ADMIN_PASSWORD" --config "$CONFIG"; then
+                      gitea admin user create --username "$GITEA_ADMIN_USERNAME" --password "$GITEA_ADMIN_PASSWORD" --email "$GITEA_ADMIN_EMAIL" --admin --must-change-password=false --config "$CONFIG"
+                    fi
           volumeMounts:
             - name: config
               mountPath: /etc/gitea/conf

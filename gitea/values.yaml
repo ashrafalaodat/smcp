@@ -54,9 +54,18 @@ features:
   packages: false
   activities: false
 
+admin:
+  username: gitea-admin
+  email: gitea-admin@example.com
+  secretName: gitea-admin-cert
+  secretKey: password
+  createSecret: true
+
 existingSecret: ""
 
-additionalEnv: []
+additionalEnv:
+  - name: GITEA__webhook__ALLOWED_HOST_LIST
+    value: el-gitea-image-listener.oci.svc.cluster.local
 
 nodeSelector: {}
 tolerations: []
