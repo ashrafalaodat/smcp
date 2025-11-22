@@ -4,354 +4,187 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"go.uber.org/zap"
 
-	"github.com/ashrafalaodat/registry/internal/domain"
-	"github.com/ashrafalaodat/registry/internal/service"
+	"github.com/ashrafalaodat/smcp/registry/internal/domain"
+	"github.com/ashrafalaodat/smcp/registry/internal/persistence"
+	"github.com/ashrafalaodat/smcp/registry/internal/service"
 )
 
-// Handler wraps HTTP endpoints for the registry.
+// Handler exposes HTTP endpoints.
 type Handler struct {
-	service *service.Service
-	logger  *zap.Logger
+	svc    *service.Service
+	logger *zap.Logger
 }
 
 // NewHandler constructs a Handler.
 func NewHandler(svc *service.Service, logger *zap.Logger) *Handler {
-	return &Handler{
-		service: svc,
-		logger:  logger,
-	}
+	return &Handler{svc: svc, logger: logger}
 }
 
-// RegisterRoutes wires the registry routes onto the router.
+// RegisterRoutes wires HTTP routes.
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Route("/v1", func(r chi.Router) {
 		r.Post("/tools", h.handleRegisterTool)
-		r.Post("/tools/search", h.handleSearchTools)
 		r.Get("/tools", h.handleListTools)
-		r.Get("/tools/{id}", h.handleGetTool)
-		r.Delete("/tools/{id}", h.handleDeleteTool)
-		r.Post("/tools/{id}/audits", h.handleCreateAudit)
+		r.Get("/tools/{owner}/{name}", h.handleGetTool)
+		r.Delete("/tools/{owner}/{name}", h.handleDeleteTool)
+		r.Post("/tools/search", h.handleSearchTools)
 	})
+}
+
+type registerToolRequest struct {
+	Owner       string `json:"owner"`
+	Name        string `json:"name"`
+	Visibility  string `json:"visibility"`
+	Description string `json:"description"`
+}
+
+type searchToolsRequest struct {
+	Owner       string `json:"owner"`
+	Visibility  string `json:"visibility"`
+	Limit       int    `json:"limit"`
+	Description string `json:"description"`
+}
+
+type toolResponse struct {
+	Owner      string    `json:"owner"`
+	Name       string    `json:"name"`
+	Visibility string    `json:"visibility"`
+	Embedding  []float32 `json:"embedding"`
+}
+
+type searchResponse struct {
+	Tool  toolResponse `json:"tool"`
+	Score float32      `json:"score"`
 }
 
 func (h *Handler) handleRegisterTool(w http.ResponseWriter, r *http.Request) {
-	var payload registerToolRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+	var req registerToolRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid payload", err)
 		return
 	}
 
-	var toolID *uuid.UUID
-	if payload.ID != "" {
-		id, err := uuid.Parse(payload.ID)
-		if err != nil {
-			h.writeError(w, http.StatusBadRequest, "invalid id", err)
-			return
-		}
-		toolID = &id
-	}
-
-	input := service.RegisterToolInput{
-		ID:          toolID,
-		Owner:       payload.Owner,
-		Name:        payload.Name,
-		Description: payload.Description,
-		Inputs:      payload.Inputs,
-		Outputs:     payload.Outputs,
-	}
-
-	for _, policy := range payload.Policies {
-		var policyID *uuid.UUID
-		if policy.ID != "" {
-			id, err := uuid.Parse(policy.ID)
-			if err != nil {
-				h.writeError(w, http.StatusBadRequest, "invalid policy id", err)
-				return
-			}
-			policyID = &id
-		}
-		input.Policies = append(input.Policies, service.PolicyInput{
-			ID:           policyID,
-			Principal:    policy.Principal,
-			AllowedScope: policy.AllowedScope,
-			Conditions:   policy.Conditions,
-		})
-	}
-
-	details, err := h.service.RegisterTool(r.Context(), input)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrToolNotFound) {
-			status = http.StatusNotFound
-		}
-		h.writeError(w, status, "register tool failed", err)
-		return
-	}
-
-	h.writeJSON(w, http.StatusCreated, toToolDetailsPayload(details))
-}
-
-func (h *Handler) handleSearchTools(w http.ResponseWriter, r *http.Request) {
-	var payload searchToolsRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid payload", err)
-		return
-	}
-
-	payload.Description = strings.TrimSpace(payload.Description)
-	if payload.Description == "" {
-		h.writeError(w, http.StatusBadRequest, "description is required", errors.New("description is required"))
-		return
-	}
-
-	limit := payload.Limit
-	if limit <= 0 {
-		limit = 5
-	}
-
-	tools, err := h.service.SearchTools(r.Context(), service.SearchToolsInput{
-		Description: payload.Description,
-		Limit:       limit,
+	record, err := h.svc.RegisterTool(r.Context(), service.RegisterToolInput{
+		Owner:       req.Owner,
+		Name:        req.Name,
+		Visibility:  req.Visibility,
+		Description: req.Description,
 	})
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrVectorizerUnavailable) {
-			status = http.StatusServiceUnavailable
-		}
-		h.writeError(w, status, "search tools failed", err)
+		h.handleServiceError(w, err)
 		return
 	}
 
-	response := make([]toolPayload, 0, len(tools))
-	for _, tool := range tools {
-		response = append(response, toToolPayload(tool))
-	}
-
-	h.writeJSON(w, http.StatusOK, response)
+	h.writeJSON(w, http.StatusCreated, toToolResponse(record))
 }
 
 func (h *Handler) handleListTools(w http.ResponseWriter, r *http.Request) {
-	input := service.ListToolsInput{
-		Owner: r.URL.Query().Get("owner"),
-		Name:  r.URL.Query().Get("name"),
-		Query: r.URL.Query().Get("q"),
-	}
-
-	tools, err := h.service.ListTools(r.Context(), input)
+	tools, err := h.svc.ListTools(r.Context(), service.ListToolsInput{
+		Owner:      r.URL.Query().Get("owner"),
+		Visibility: r.URL.Query().Get("visibility"),
+	})
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, "list tools failed", err)
 		return
 	}
 
-	payload := make([]toolPayload, 0, len(tools))
-	for _, tool := range tools {
-		payload = append(payload, toToolPayload(tool))
+	resp := make([]toolResponse, 0, len(tools))
+	for _, t := range tools {
+		resp = append(resp, toToolResponse(t))
 	}
-	h.writeJSON(w, http.StatusOK, payload)
+	h.writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) handleGetTool(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	owner := chi.URLParam(r, "owner")
+	name := chi.URLParam(r, "name")
+
+	tool, err := h.svc.GetTool(r.Context(), owner, name)
 	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid id", err)
+		h.handleServiceError(w, err)
 		return
 	}
 
-	details, err := h.service.GetTool(r.Context(), id)
-	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrToolNotFound) {
-			status = http.StatusNotFound
-		}
-		h.writeError(w, status, "get tool failed", err)
-		return
-	}
-
-	h.writeJSON(w, http.StatusOK, toToolDetailsPayload(details))
+	h.writeJSON(w, http.StatusOK, toToolResponse(tool))
 }
 
 func (h *Handler) handleDeleteTool(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid id", err)
+	owner := chi.URLParam(r, "owner")
+	name := chi.URLParam(r, "name")
+
+	if err := h.svc.DeleteTool(r.Context(), owner, name); err != nil {
+		h.handleServiceError(w, err)
 		return
 	}
-
-	if err := h.service.DeleteTool(r.Context(), id); err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrToolNotFound) {
-			status = http.StatusNotFound
-		}
-		h.writeError(w, status, "delete tool failed", err)
-		return
-	}
-
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) handleCreateAudit(w http.ResponseWriter, r *http.Request) {
-	id, err := uuid.Parse(chi.URLParam(r, "id"))
-	if err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid id", err)
-		return
-	}
-
-	var payload auditRequest
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+func (h *Handler) handleSearchTools(w http.ResponseWriter, r *http.Request) {
+	var req searchToolsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.writeError(w, http.StatusBadRequest, "invalid payload", err)
 		return
 	}
 
-	event, err := h.service.RecordAudit(r.Context(), id, service.AuditInput{
-		EventType: payload.EventType,
-		Actor:     payload.Actor,
-		Payload:   payload.Payload,
+	results, err := h.svc.SearchTools(r.Context(), service.SearchToolsInput{
+		Owner:       req.Owner,
+		Visibility:  req.Visibility,
+		Limit:       req.Limit,
+		Description: req.Description,
 	})
 	if err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, service.ErrToolNotFound) {
-			status = http.StatusNotFound
-		}
-		h.writeError(w, status, "record audit failed", err)
+		h.handleServiceError(w, err)
 		return
 	}
 
-	h.writeJSON(w, http.StatusCreated, event)
+	resp := make([]searchResponse, 0, len(results))
+	for _, result := range results {
+		resp = append(resp, searchResponse{
+			Tool:  toToolResponse(result.Tool),
+			Score: result.Score,
+		})
+	}
+	h.writeJSON(w, http.StatusOK, resp)
+}
+
+func (h *Handler) handleServiceError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, persistence.ErrNotFound):
+		h.writeError(w, http.StatusNotFound, "resource not found", err)
+	case errors.Is(err, service.ErrVectorizerUnavailable):
+		h.writeError(w, http.StatusServiceUnavailable, "vectorizer unavailable", err)
+	case service.IsValidationError(err):
+		h.writeError(w, http.StatusBadRequest, err.Error(), err)
+	default:
+		h.writeError(w, http.StatusInternalServerError, "internal error", err)
+	}
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	if payload == nil {
-		return
-	}
 	if err := json.NewEncoder(w).Encode(payload); err != nil {
-		h.logger.Error("write json failed", zap.Error(err))
+		h.logger.Error("write response failed", zap.Error(err))
 	}
 }
 
 func (h *Handler) writeError(w http.ResponseWriter, status int, message string, err error) {
-	h.logger.Error(message, zap.Int("status", status), zap.Error(err))
-	h.writeJSON(w, status, errorResponse{
-		Error:   message,
-		Details: err.Error(),
-	})
-}
-
-type registerToolRequest struct {
-	ID          string            `json:"id"`
-	Owner       string            `json:"owner"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Inputs      map[string]string `json:"inputs"`
-	Outputs     map[string]string `json:"outputs"`
-	Policies    []policyRequest   `json:"policies"`
-}
-
-type searchToolsRequest struct {
-	Description string `json:"description"`
-	Limit       int    `json:"limit"`
-}
-
-type policyRequest struct {
-	ID           string         `json:"id"`
-	Principal    string         `json:"principal"`
-	AllowedScope []string       `json:"allowed_scope"`
-	Conditions   map[string]any `json:"conditions"`
-}
-
-type auditRequest struct {
-	EventType string         `json:"event_type"`
-	Actor     string         `json:"actor"`
-	Payload   map[string]any `json:"payload"`
-}
-
-type errorResponse struct {
-	Error   string `json:"error"`
-	Details string `json:"details,omitempty"`
-}
-
-type toolPayload struct {
-	ID          uuid.UUID         `json:"id"`
-	Owner       string            `json:"owner"`
-	Name        string            `json:"name"`
-	Description string            `json:"description"`
-	Embedding   []float32         `json:"embedding"`
-	Inputs      map[string]string `json:"inputs"`
-	Outputs     map[string]string `json:"outputs"`
-	CreatedAt   string            `json:"created_at"`
-	UpdatedAt   string            `json:"updated_at"`
-}
-
-type policyPayload struct {
-	ID           uuid.UUID      `json:"id"`
-	Principal    string         `json:"principal"`
-	AllowedScope []string       `json:"allowed_scope"`
-	Conditions   map[string]any `json:"conditions"`
-	CreatedAt    string         `json:"created_at"`
-}
-
-type auditPayload struct {
-	ID        int64          `json:"id"`
-	EventType string         `json:"event_type"`
-	Actor     string         `json:"actor"`
-	Payload   map[string]any `json:"payload"`
-	CreatedAt string         `json:"created_at"`
-}
-
-type toolDetailsPayload struct {
-	Tool     toolPayload     `json:"tool"`
-	Policies []policyPayload `json:"policies"`
-	Audits   []auditPayload  `json:"audits"`
-}
-
-func toToolPayload(tool domain.Tool) toolPayload {
-	return toolPayload{
-		ID:          tool.ID,
-		Owner:       tool.Owner,
-		Name:        tool.Name,
-		Description: tool.Description,
-		Embedding:   tool.Embedding,
-		Inputs:      tool.Inputs,
-		Outputs:     tool.Outputs,
-		CreatedAt:   tool.CreatedAt.UTC().Format(time.RFC3339Nano),
-		UpdatedAt:   tool.UpdatedAt.UTC().Format(time.RFC3339Nano),
+	h.logger.Warn(message, zap.Error(err))
+	type errorResponse struct {
+		Error string `json:"error"`
 	}
+	h.writeJSON(w, status, errorResponse{Error: message})
 }
 
-func toToolDetailsPayload(details domain.ToolDetails) toolDetailsPayload {
-	policies := make([]policyPayload, 0, len(details.Policies))
-	for _, policy := range details.Policies {
-		policies = append(policies, policyPayload{
-			ID:           policy.ID,
-			Principal:    policy.Principal,
-			AllowedScope: policy.AllowedScope,
-			Conditions:   policy.Conditions,
-			CreatedAt:    policy.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-	}
-
-	audits := make([]auditPayload, 0, len(details.Audits))
-	for _, audit := range details.Audits {
-		audits = append(audits, auditPayload{
-			ID:        audit.ID,
-			EventType: audit.EventType,
-			Actor:     audit.Actor,
-			Payload:   audit.Payload,
-			CreatedAt: audit.CreatedAt.UTC().Format(time.RFC3339Nano),
-		})
-	}
-
-	return toolDetailsPayload{
-		Tool:     toToolPayload(details.Tool),
-		Policies: policies,
-		Audits:   audits,
+func toToolResponse(tool domain.ToolRecord) toolResponse {
+	return toolResponse{
+		Owner:      tool.Owner,
+		Name:       tool.Name,
+		Visibility: tool.Visibility,
+		Embedding:  tool.Embedding,
 	}
 }

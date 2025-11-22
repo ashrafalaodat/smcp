@@ -1,137 +1,28 @@
-replicaCount: 2
+replicaCount: 1
 
 image:
-  repository: local-registry:5000/mcp-registry
-  tag: "latest"
+  repository: oci-registry-distribution.oci.svc.cluster.local:5000/registry
+  tag: v1
   pullPolicy: IfNotPresent
-
-imagePullSecrets: []
-
-nameOverride: ""
-fullnameOverride: ""
-
-serviceAccount:
-  create: true
-  annotations: {}
-  name: ""
-
-podAnnotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "8080"
-
-podLabels: {}
-
-podSecurityContext: {}
-
-securityContext:
-  runAsUser: 65532
-  runAsGroup: 65532
-  runAsNonRoot: true
-  readOnlyRootFilesystem: true
 
 service:
   type: ClusterIP
-  port: 80
-  targetPort: 8080
-
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: registry.local
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
-
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 512Mi
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
+  port: 8080
 
 env:
-  - name: MCP_REGISTRY_DATABASE_URL
-    valueFrom:
-      secretKeyRef:
-        name: mcp-registry-db-postgres
-        key: uri
-  - name: MCP_REGISTRY_METRICS_ENABLED
-    value: "true"
-  - name: VECTORIZE_URL
-    value: http://ollama.mcp.svc.cluster.local:11434
-  - name: VECTORIZE_API_KEY
-    valueFrom:
-      secretKeyRef:
-        name: mcp-vectorize
-        key: apiKey
-  - name: VECTORIZE_MODEL
-    value: "nomic-embed-text"
+  qdrantHost: "qdrant"
+  qdrantPort: 6334
+  qdrantAPIKey: ""
+  qdrantCollection: mcp_tools
+  embeddingDim: 1536
+  defaultVisibility: public
+  httpAddress: ":8080"
+  vectorizeURL: "http://ollama.mcp.svc.cluster.local:11434"
+  vectorizeAPIKey: ""
+  vectorizeModel: nomic-embed-text
 
-extraEnv: []
+resources: {}
 
-config:
-  enabled: false
-  data: {}
-
-secret:
-  enabled: false
-  data: {}
-
-migrations:
-  enabled: true
-  image:
-    repository: docker.io/library/postgres
-    tag: "16.3"
-    pullPolicy: IfNotPresent
-  script: |
-    CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-    CREATE EXTENSION IF NOT EXISTS pg_trgm;
-    CREATE EXTENSION IF NOT EXISTS vector;
-
-    CREATE TABLE IF NOT EXISTS tools (
-      id UUID PRIMARY KEY,
-      owner TEXT NOT NULL,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL,
-      embedding vector,
-      inputs JSONB NOT NULL DEFAULT '{}'::jsonb,
-      outputs JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL,
-      updated_at TIMESTAMPTZ NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_tools_owner ON tools(owner);
-    CREATE INDEX IF NOT EXISTS idx_tools_name_trgm ON tools USING GIN (name gin_trgm_ops);
-    CREATE INDEX IF NOT EXISTS idx_tools_description_trgm ON tools USING GIN (description gin_trgm_ops);
-
-    CREATE TABLE IF NOT EXISTS policies (
-      id UUID PRIMARY KEY,
-      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
-      principal TEXT NOT NULL,
-      allowed_scope TEXT[] NOT NULL DEFAULT '{}',
-      conditions JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_policies_tool_id ON policies(tool_id);
-
-    CREATE TABLE IF NOT EXISTS audit (
-      id BIGSERIAL PRIMARY KEY,
-      tool_id UUID NOT NULL REFERENCES tools(id) ON DELETE CASCADE,
-      event_type TEXT NOT NULL,
-      actor TEXT NOT NULL,
-      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
-    CREATE INDEX IF NOT EXISTS idx_audit_tool_id ON audit(tool_id);
-
-extraVolumes: []
-extraVolumeMounts: []
+affinity: {}
+nodeSelector: {}
+tolerations: []

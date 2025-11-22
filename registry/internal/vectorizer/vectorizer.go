@@ -10,49 +10,42 @@ import (
 	"time"
 )
 
-// Client calls an external vectorization microservice.
+// Client calls an external embeddings service (e.g., Ollama, OpenAI-compatible).
 type Client struct {
 	baseURL        string
 	model          string
 	apiKey         string
 	encodingFormat string
-	client         *http.Client
+	httpClient     *http.Client
 }
 
-// New creates a vectorizer client.
+// New constructs a vectorizer client.
 func New(baseURL, apiKey, model string) *Client {
-	const (
-		defaultModel = "nomic-embed-text"
-	)
-
-	if model == "" {
-		model = defaultModel
+	if baseURL == "" {
+		return nil
 	}
-
+	if model == "" {
+		model = "nomic-embed-text"
+	}
 	return &Client{
 		baseURL:        strings.TrimRight(baseURL, "/"),
 		model:          model,
 		apiKey:         apiKey,
 		encodingFormat: "float",
-		client: &http.Client{
-			Timeout: 10 * time.Second,
-		},
+		httpClient:     &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// Embed generates an embedding for the provided text.
+// Embed generates an embedding for free-form text.
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
-	if c == nil || c.baseURL == "" {
+	if c == nil {
 		return nil, fmt.Errorf("vectorizer not configured")
 	}
-
-	type embedRequest struct {
+	payload := struct {
 		Input          string `json:"input"`
 		Model          string `json:"model"`
 		EncodingFormat string `json:"encoding_format"`
-	}
-
-	payload := embedRequest{
+	}{
 		Input:          text,
 		Model:          c.model,
 		EncodingFormat: c.encodingFormat,
@@ -63,40 +56,35 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 		return nil, fmt.Errorf("marshal payload: %w", err)
 	}
 
-	endpoint := c.baseURL + "/v1/embeddings"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/embeddings", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("new request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.apiKey))
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("call vectorizer: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("vectorizer returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("vectorizer status %d", resp.StatusCode)
 	}
 
-	type embedding struct {
-		Embedding []float32 `json:"embedding"`
-	}
 	var result struct {
-		Data []embedding `json:"data"`
+		Data []struct {
+			Embedding []float32 `json:"embedding"`
+		} `json:"data"`
 	}
-
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decode vectorizer response: %w", err)
+		return nil, fmt.Errorf("decode body: %w", err)
 	}
-
 	if len(result.Data) == 0 {
 		return nil, fmt.Errorf("vectorizer response missing data")
 	}
-
 	return result.Data[0].Embedding, nil
 }

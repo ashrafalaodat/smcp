@@ -7,42 +7,42 @@ import (
 	"github.com/kelseyhightower/envconfig"
 )
 
-// Config captures runtime configuration sourced from the environment.
+// Config captures runtime configuration for the Qdrant-backed registry.
 type Config struct {
-	ServiceName             string        `envconfig:"SERVICE_NAME" default:"mcp-registry"`
+	ServiceName             string        `envconfig:"SERVICE_NAME" default:"qdrant-registry"`
 	HTTPAddress             string        `envconfig:"HTTP_ADDRESS" default:":8080"`
 	GracefulShutdownTimeout time.Duration `envconfig:"GRACEFUL_SHUTDOWN_TIMEOUT" default:"20s"`
 
-	DatabaseURL string `envconfig:"DATABASE_URL" required:"true"`
+	QdrantHost       string `envconfig:"HOST" default:"localhost"`
+	QdrantPort       int    `envconfig:"PORT" default:"6334"`
+	QdrantAPIKey     string `envconfig:"API_KEY"`
+	QdrantCollection string `envconfig:"COLLECTION" default:"mcp_tools"`
+	EmbeddingDim     int    `envconfig:"EMBEDDING_DIM" required:"true"`
 
-	RedisEnabled bool          `envconfig:"REDIS_ENABLED" default:"false"`
-	RedisAddr    string        `envconfig:"REDIS_ADDR" default:"127.0.0.1:6379"`
-	RedisDB      int           `envconfig:"REDIS_DB" default:"0"`
-	RedisTimeout time.Duration `envconfig:"REDIS_TIMEOUT" default:"5s"`
+	DefaultVisibility string `envconfig:"DEFAULT_VISIBILITY" default:"public"`
 
-	VectorizeURL    string `envconfig:"VECTORIZE_URL" default:"http://localhost:11434"`
+	MetricsEnabled bool   `envconfig:"METRICS_ENABLED" default:"false"`
+	LogLevel       string `envconfig:"LOG_LEVEL" default:"info"`
+
+	VectorizeURL    string `envconfig:"VECTORIZE_URL"`
 	VectorizeAPIKey string `envconfig:"VECTORIZE_API_KEY"`
 	VectorizeModel  string `envconfig:"VECTORIZE_MODEL" default:"nomic-embed-text"`
-
-	RerankURL    string `envconfig:"RERANK_URL"`
-	RerankAPIKey string `envconfig:"RERANK_API_KEY"`
-	RerankModel  string `envconfig:"RERANK_MODEL" default:"rerank-english-v3.0"`
-	RerankTopN   int    `envconfig:"RERANK_TOP_N" default:"20"`
-
-	MetricsEnabled bool   `envconfig:"METRICS_ENABLED" default:"true"`
-	LogLevel       string `envconfig:"LOG_LEVEL" default:"info"`
 }
 
-// Load reads configuration from environment variables.
+// Load reads env vars prefixed with MCP_QDRANT_.
 func Load() (Config, error) {
 	var cfg Config
-	if err := envconfig.Process("MCP_REGISTRY", &cfg); err != nil {
+	if err := envconfig.Process("MCP_QDRANT", &cfg); err != nil {
 		return Config{}, fmt.Errorf("load config: %w", err)
 	}
-
-	if cfg.RedisEnabled && cfg.RedisAddr == "" {
-		return Config{}, fmt.Errorf("redis enabled but MCP_REGISTRY_REDIS_ADDR not provided")
+	if cfg.EmbeddingDim <= 0 {
+		return Config{}, fmt.Errorf("MCP_QDRANT_EMBEDDING_DIM must be > 0")
 	}
-
+	if cfg.QdrantHost == "" {
+		return Config{}, fmt.Errorf("MCP_QDRANT_HOST is required")
+	}
+	if cfg.QdrantPort <= 0 {
+		return Config{}, fmt.Errorf("MCP_QDRANT_PORT must be > 0")
+	}
 	return cfg, nil
 }

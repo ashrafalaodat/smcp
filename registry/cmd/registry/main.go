@@ -9,16 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	httpapi "github.com/ashrafalaodat/smcp/registry/internal/api/http"
+	"github.com/ashrafalaodat/smcp/registry/internal/config"
+	"github.com/ashrafalaodat/smcp/registry/internal/persistence/qdrant"
+	"github.com/ashrafalaodat/smcp/registry/internal/service"
+	"github.com/ashrafalaodat/smcp/registry/internal/vectorizer"
+	"github.com/ashrafalaodat/smcp/registry/pkg/logging"
 	"go.uber.org/zap"
-
-	httpapi "github.com/ashrafalaodat/registry/internal/api/http"
-	"github.com/ashrafalaodat/registry/internal/config"
-	"github.com/ashrafalaodat/registry/internal/persistence/postgres"
-	"github.com/ashrafalaodat/registry/internal/ranking"
-	"github.com/ashrafalaodat/registry/internal/service"
-	"github.com/ashrafalaodat/registry/internal/vectorizer"
-	"github.com/ashrafalaodat/registry/pkg/logging"
 )
 
 func main() {
@@ -36,37 +33,26 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	repo, err := qdrantrepo.New(ctx, qdrantrepo.Config{
+		Host:       cfg.QdrantHost,
+		Port:       cfg.QdrantPort,
+		APIKey:     cfg.QdrantAPIKey,
+		Collection: cfg.QdrantCollection,
+		Dimension:  cfg.EmbeddingDim,
+	})
 	if err != nil {
-		logger.Fatal("failed to create postgres pool", zap.Error(err))
+		logger.Fatal("failed to initialize qdrant repository", zap.Error(err))
 	}
-	defer pool.Close()
+	defer repo.Close()
 
-	if err := pool.Ping(ctx); err != nil {
-		logger.Fatal("failed to ping database", zap.Error(err))
+	if cfg.VectorizeURL == "" {
+		logger.Fatal("MCP_QDRANT_VECTORIZE_URL must be set to generate embeddings")
 	}
+	vec := vectorizer.New(cfg.VectorizeURL, cfg.VectorizeAPIKey, cfg.VectorizeModel)
 
-	repo := postgres.NewRepository(pool)
-	var vec service.Vectorizer
-	if cfg.VectorizeURL != "" {
-		vec = vectorizer.New(cfg.VectorizeURL, cfg.VectorizeAPIKey, cfg.VectorizeModel)
-	} else {
-		logger.Warn("vectorizer URL not configured; embeddings will be empty")
-	}
-
-	var reranker service.Reranker
-	if cfg.RerankURL != "" {
-		reranker = ranking.NewClient(cfg.RerankURL, cfg.RerankAPIKey, cfg.RerankModel, cfg.RerankTopN)
-		if reranker == nil {
-			logger.Warn("rerank URL configured but client could not be created")
-		}
-	} else {
-		logger.Info("reranker URL not configured; falling back to vector distance ordering")
-	}
-
-	svc := service.New(repo, vec, reranker)
+	svc := service.New(repo, vec, cfg.EmbeddingDim, cfg.DefaultVisibility)
 	handler := httpapi.NewHandler(svc, logger)
-	router := httpapi.NewRouter(handler, cfg.MetricsEnabled)
+	router := httpapi.NewRouter(handler)
 
 	server := &http.Server{
 		Addr:         cfg.HTTPAddress,
@@ -76,7 +62,7 @@ func main() {
 	}
 
 	go func() {
-		logger.Info("starting registry server", zap.String("addr", cfg.HTTPAddress))
+		logger.Info("starting qdrant registry", zap.String("addr", cfg.HTTPAddress))
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logger.Fatal("http server failed", zap.Error(err))
 		}

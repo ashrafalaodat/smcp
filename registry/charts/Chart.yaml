@@ -1,6 +1,6 @@
 apiVersion: v2
 name: registry
-description: Helm chart for the MCP registry service
-type: application
+description: MCP registry service backed by Qdrant
 version: 0.1.0
 appVersion: "0.1.0"
+type: application

@@ -4,32 +4,31 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
-
-	"github.com/ashrafalaodat/registry/internal/domain"
+	"github.com/ashrafalaodat/smcp/registry/internal/domain"
 )
 
-// ErrNotFound is returned when an entity cannot be located.
-var ErrNotFound = errors.New("not found")
+// ErrNotFound indicates that the requested record does not exist.
+var ErrNotFound = errors.New("record not found")
 
-// ToolFilters narrow tool lookup results.
-type ToolFilters struct {
-	Owner string
-	Name  string
-	Query string
+// Filters constrains listing queries.
+type Filters struct {
+	Owner      string
+	Name       string
+	Visibility string
 }
 
-// RegistryRepository captures the persistence contract for the registry service.
-type RegistryRepository interface {
-	UpsertTool(ctx context.Context, tool domain.Tool) (domain.Tool, error)
-	GetToolByID(ctx context.Context, id uuid.UUID) (domain.Tool, error)
-	ListTools(ctx context.Context, filters ToolFilters) ([]domain.Tool, error)
-	SearchToolsByEmbedding(ctx context.Context, embedding []float32, limit int) ([]domain.Tool, error)
-	DeleteTool(ctx context.Context, id uuid.UUID) error
+// SearchFilters extend Filters with a limit for similarity queries.
+type SearchFilters struct {
+	Filters
+	Limit int
+}
 
-	ReplacePolicies(ctx context.Context, toolID uuid.UUID, policies []domain.Policy) error
-	ListPolicies(ctx context.Context, toolID uuid.UUID) ([]domain.Policy, error)
-
-	CreateAudit(ctx context.Context, event domain.AuditEvent) (domain.AuditEvent, error)
-	ListAudits(ctx context.Context, toolID uuid.UUID, limit int) ([]domain.AuditEvent, error)
+// Repository captures persistence interactions for the registry.
+type Repository interface {
+	Upsert(ctx context.Context, tool domain.ToolRecord) error
+	Get(ctx context.Context, owner, name string) (domain.ToolRecord, error)
+	Delete(ctx context.Context, owner, name string) error
+	List(ctx context.Context, filters Filters) ([]domain.ToolRecord, error)
+	Search(ctx context.Context, embedding []float32, filters SearchFilters) ([]domain.ScoredTool, error)
+	Close() error
 }

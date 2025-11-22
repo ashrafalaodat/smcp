@@ -8,7 +8,7 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-// New constructs a structured logger honoring the provided log level.
+// New constructs a structured zap logger honoring log level.
 func New(level string) (*zap.Logger, error) {
 	lvl := zap.InfoLevel
 	if level != "" {

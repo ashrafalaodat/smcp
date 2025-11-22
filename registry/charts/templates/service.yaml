@@ -4,16 +4,14 @@ metadata:
   name: {{ include "registry.fullname" . }}
   labels:
     app.kubernetes.io/name: {{ include "registry.name" . }}
-    helm.sh/chart: {{ include "registry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   type: {{ .Values.service.type }}
-  ports:
-    - port: {{ .Values.service.port }}
-      targetPort: {{ .Values.service.targetPort }}
-      protocol: TCP
-      name: http
   selector:
     app.kubernetes.io/name: {{ include "registry.name" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http

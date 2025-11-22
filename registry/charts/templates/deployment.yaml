@@ -4,9 +4,7 @@ metadata:
   name: {{ include "registry.fullname" . }}
   labels:
     app.kubernetes.io/name: {{ include "registry.name" . }}
-    helm.sh/chart: {{ include "registry.chart" . }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -18,103 +16,36 @@ spec:
       labels:
         app.kubernetes.io/name: {{ include "registry.name" . }}
         app.kubernetes.io/instance: {{ .Release.Name }}
-        {{- with .Values.podLabels }}
-{{ toYaml . | indent 8 }}
-        {{- end }}
-      {{- with .Values.podAnnotations }}
-      annotations:
-{{ toYaml . | indent 8 }}
-      {{- end }}
     spec:
-      serviceAccountName: {{ include "registry.serviceAccountName" . }}
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-{{ toYaml . | indent 8 }}
-      {{- end }}
-      securityContext:
-{{ toYaml .Values.podSecurityContext | indent 8 }}
-      {{- if .Values.migrations.enabled }}
-      initContainers:
-        - name: run-migrations
-          image: "{{ .Values.migrations.image.repository }}:{{ .Values.migrations.image.tag }}"
-          imagePullPolicy: {{ .Values.migrations.image.pullPolicy }}
-          env:
-{{ toYaml .Values.env | indent 12 }}
-          {{- with .Values.extraEnv }}
-{{ toYaml . | indent 12 }}
-          {{- end }}
-          command:
-            - /bin/bash
-            - -c
-          args:
-            - |
-              set -euo pipefail
-              if [ -z "${MCP_REGISTRY_DATABASE_URL:-}" ]; then
-                echo "MCP_REGISTRY_DATABASE_URL is not set" >&2
-                exit 1
-              fi
-              if [ ! -f /migrations/schema.sql ]; then
-                echo "schema.sql not found" >&2
-                exit 1
-              fi
-              psql "$MCP_REGISTRY_DATABASE_URL" -f /migrations/schema.sql
-          volumeMounts:
-            - name: registry-migrations
-              mountPath: /migrations
-      {{- end }}
       containers:
         - name: registry
-          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - name: http
-              containerPort: {{ .Values.service.targetPort }}
-              protocol: TCP
           env:
-{{ toYaml .Values.env | indent 12 }}
-          {{- with .Values.extraEnv }}
-{{ toYaml . | indent 12 }}
-          {{- end }}
+            - name: MCP_QDRANT_HOST
+              value: {{ .Values.env.qdrantHost | quote }}
+            - name: MCP_QDRANT_PORT
+              value: {{ .Values.env.qdrantPort | quote }}
+            - name: MCP_QDRANT_API_KEY
+              value: {{ .Values.env.qdrantAPIKey | quote }}
+            - name: MCP_QDRANT_COLLECTION
+              value: {{ .Values.env.qdrantCollection | quote }}
+            - name: MCP_QDRANT_EMBEDDING_DIM
+              value: {{ .Values.env.embeddingDim | quote }}
+            - name: MCP_QDRANT_DEFAULT_VISIBILITY
+              value: {{ .Values.env.defaultVisibility | quote }}
+            - name: MCP_QDRANT_HTTP_ADDRESS
+              value: {{ .Values.env.httpAddress | quote }}
+            - name: MCP_QDRANT_VECTORIZE_URL
+              value: {{ .Values.env.vectorizeURL | quote }}
+            - name: MCP_QDRANT_VECTORIZE_API_KEY
+              value: {{ .Values.env.vectorizeAPIKey | quote }}
+            - name: MCP_QDRANT_VECTORIZE_MODEL
+              value: {{ .Values.env.vectorizeModel | quote }}
+          ports:
+            - containerPort: 8080
+              name: http
+          {{- with .Values.resources }}
           resources:
-{{ toYaml .Values.resources | indent 12 }}
-          securityContext:
-{{ toYaml .Values.securityContext | indent 12 }}
-          readinessProbe:
-            httpGet:
-              path: /v1/tools
-              port: http
-            initialDelaySeconds: 5
-            periodSeconds: 10
-          livenessProbe:
-            httpGet:
-              path: /v1/tools
-              port: http
-            initialDelaySeconds: 15
-            periodSeconds: 20
-          {{- if .Values.extraVolumeMounts }}
-          volumeMounts:
-{{ toYaml .Values.extraVolumeMounts | indent 12 }}
+            {{- toYaml . | nindent 12 }}
           {{- end }}
-      {{- if or .Values.migrations.enabled .Values.extraVolumes }}
-      volumes:
-        {{- if .Values.migrations.enabled }}
-        - name: registry-migrations
-          configMap:
-            name: {{ include "registry.fullname" . }}-migrations
-        {{- end }}
-        {{- if .Values.extraVolumes }}
-{{ toYaml .Values.extraVolumes | indent 8 }}
-        {{- end }}
-      {{- end }}
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-{{ toYaml . | indent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-{{ toYaml . | indent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-{{ toYaml . | indent 8 }}
-      {{- end }}

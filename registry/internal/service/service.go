@@ -5,309 +5,187 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
-
-	"github.com/ashrafalaodat/registry/internal/domain"
-	"github.com/ashrafalaodat/registry/internal/persistence"
+	"github.com/ashrafalaodat/smcp/registry/internal/domain"
+	"github.com/ashrafalaodat/smcp/registry/internal/persistence"
 )
 
-// ErrToolNotFound indicates the requested tool id does not exist.
-var ErrToolNotFound = errors.New("tool not found")
+var (
+	// ErrVectorizerUnavailable indicates that no vectorizer client was configured.
+	ErrVectorizerUnavailable = errors.New("vectorizer not configured")
+)
 
-// ErrVectorizerUnavailable signals vector search cannot be performed.
-var ErrVectorizerUnavailable = errors.New("vectorizer not configured")
+type validationError struct {
+	msg string
+}
 
-// Vectorizer describes the semantic embedding dependency.
+func (e validationError) Error() string { return e.msg }
+
+func newValidationError(format string, args ...any) error {
+	return validationError{msg: fmt.Sprintf(format, args...)}
+}
+
+func isValidationError(err error) bool {
+	var target validationError
+	return errors.As(err, &target)
+}
+
+// IsValidationError signals whether the provided error originated from input validation.
+func IsValidationError(err error) bool {
+	return isValidationError(err)
+}
+
+// Vectorizer encapsulates embedding generation for free-form text.
 type Vectorizer interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
-// Reranker scores and reorders search candidates for improved relevance.
-type Reranker interface {
-	Rank(ctx context.Context, query string, candidates []domain.Tool) ([]domain.Tool, error)
-}
-
-// Service coordinates business logic for the registry.
+// Service coordinates registry operations on top of the repository.
 type Service struct {
-	repo       persistence.RegistryRepository
-	vectorizer Vectorizer
-	reranker   Reranker
-	now        func() time.Time
+	repo              persistence.Repository
+	vectorizer        Vectorizer
+	dim               int
+	defaultVisibility string
 }
 
-// New constructs a Service.
-func New(repo persistence.RegistryRepository, vectorizer Vectorizer, reranker Reranker) *Service {
+// New creates a service instance.
+func New(repo persistence.Repository, vectorizer Vectorizer, dim int, defaultVisibility string) *Service {
+	vis := strings.ToLower(strings.TrimSpace(defaultVisibility))
+	if vis == "" {
+		vis = "public"
+	}
 	return &Service{
-		repo:       repo,
-		vectorizer: vectorizer,
-		reranker:   reranker,
-		now:        time.Now,
+		repo:              repo,
+		vectorizer:        vectorizer,
+		dim:               dim,
+		defaultVisibility: vis,
 	}
 }
 
-// RegisterToolInput carries registration details.
+// RegisterToolInput captures the payload for registrations.
 type RegisterToolInput struct {
-	ID          *uuid.UUID
 	Owner       string
 	Name        string
+	Visibility  string
 	Description string
-	Inputs      map[string]string
-	Outputs     map[string]string
-	Policies    []PolicyInput
 }
 
-// PolicyInput describes an incoming policy payload.
-type PolicyInput struct {
-	ID           *uuid.UUID
-	Principal    string
-	AllowedScope []string
-	Conditions   map[string]any
-}
-
-// ListToolsInput expresses query parameters for discovery.
+// ListToolsInput constrains listing queries.
 type ListToolsInput struct {
-	Owner string
-	Name  string
-	Query string
+	Owner      string
+	Visibility string
 }
 
+// SearchToolsInput constrains similarity searches.
 type SearchToolsInput struct {
-	Description string
+	Owner       string
+	Visibility  string
 	Limit       int
+	Description string
 }
 
-// AuditInput captures audit event data.
-type AuditInput struct {
-	EventType string
-	Actor     string
-	Payload   map[string]any
-}
-
-// RegisterTool registers or updates a tool entry and refreshes its policies.
-func (s *Service) RegisterTool(ctx context.Context, input RegisterToolInput) (domain.ToolDetails, error) {
-	if input.Owner == "" {
-		return domain.ToolDetails{}, fmt.Errorf("owner is required")
+// RegisterTool writes or updates a tool record.
+func (s *Service) RegisterTool(ctx context.Context, input RegisterToolInput) (domain.ToolRecord, error) {
+	owner := strings.TrimSpace(input.Owner)
+	name := strings.TrimSpace(input.Name)
+	if owner == "" {
+		return domain.ToolRecord{}, newValidationError("owner is required")
 	}
-	if input.Name == "" {
-		return domain.ToolDetails{}, fmt.Errorf("name is required")
-	}
-	if input.Description == "" {
-		return domain.ToolDetails{}, fmt.Errorf("description is required")
+	if name == "" {
+		return domain.ToolRecord{}, newValidationError("name is required")
 	}
 
-	var (
-		toolID  uuid.UUID
-		current domain.Tool
-		err     error
-	)
-	if input.ID != nil {
-		toolID = *input.ID
-		current, err = s.repo.GetToolByID(ctx, toolID)
-		if err != nil {
-			if errors.Is(err, persistence.ErrNotFound) {
-				return domain.ToolDetails{}, ErrToolNotFound
-			}
-			return domain.ToolDetails{}, fmt.Errorf("load existing tool: %w", err)
-		}
-	} else {
-		toolID = uuid.New()
-	}
-
-	embedding := current.Embedding
-	if s.vectorizer != nil {
-		embedding, err = s.vectorizer.Embed(ctx, input.Description)
-		if err != nil {
-			return domain.ToolDetails{}, fmt.Errorf("vectorize description: %w", err)
-		}
-	}
-	if len(embedding) == 0 {
-		return domain.ToolDetails{}, fmt.Errorf("embedding is required")
-	}
-	now := s.now()
-	createdAt := current.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = now
-	}
-
-	inputs := input.Inputs
-	if inputs == nil {
-		inputs = map[string]string{}
-	}
-	outputs := input.Outputs
-	if outputs == nil {
-		outputs = map[string]string{}
-	}
-
-	tool := domain.Tool{
-		ID:          toolID,
-		Owner:       input.Owner,
-		Name:        input.Name,
-		Description: input.Description,
-		Embedding:   embedding,
-		Inputs:      inputs,
-		Outputs:     outputs,
-		CreatedAt:   createdAt,
-		UpdatedAt:   now,
-	}
-
-	saved, err := s.repo.UpsertTool(ctx, tool)
+	embedding, err := s.embedDescription(ctx, input.Description)
 	if err != nil {
-		return domain.ToolDetails{}, fmt.Errorf("upsert tool: %w", err)
+		return domain.ToolRecord{}, err
 	}
 
-	policies := make([]domain.Policy, 0, len(input.Policies))
-	for _, policyInput := range input.Policies {
-		policyID := uuid.New()
-		if policyInput.ID != nil {
-			policyID = *policyInput.ID
-		}
-		policies = append(policies, domain.Policy{
-			ID:           policyID,
-			ToolID:       saved.ID,
-			Principal:    policyInput.Principal,
-			AllowedScope: policyInput.AllowedScope,
-			Conditions:   policyInput.Conditions,
-			CreatedAt:    now,
-		})
-	}
-	if err := s.repo.ReplacePolicies(ctx, saved.ID, policies); err != nil {
-		return domain.ToolDetails{}, fmt.Errorf("replace policies: %w", err)
+	visibility, err := s.normalizeVisibility(input.Visibility)
+	if err != nil {
+		return domain.ToolRecord{}, err
 	}
 
-	return s.getDetails(ctx, saved.ID)
+	record := domain.ToolRecord{
+		Owner:      owner,
+		Name:       name,
+		Visibility: visibility,
+		Embedding:  embedding,
+	}
+	if err := s.repo.Upsert(ctx, record); err != nil {
+		return domain.ToolRecord{}, err
+	}
+	return record, nil
 }
 
-// GetTool returns the tool and accompanying policies/audits.
-func (s *Service) GetTool(ctx context.Context, id uuid.UUID) (domain.ToolDetails, error) {
-	return s.getDetails(ctx, id)
+// GetTool fetches a tool by owner/name.
+func (s *Service) GetTool(ctx context.Context, owner, name string) (domain.ToolRecord, error) {
+	owner = strings.TrimSpace(owner)
+	name = strings.TrimSpace(name)
+	if owner == "" || name == "" {
+		return domain.ToolRecord{}, newValidationError("owner and name are required")
+	}
+	return s.repo.Get(ctx, owner, name)
 }
 
-// ListTools returns tools filtered by the provided options.
-func (s *Service) ListTools(ctx context.Context, input ListToolsInput) ([]domain.Tool, error) {
-	tools, err := s.repo.ListTools(ctx, persistence.ToolFilters{
-		Owner: input.Owner,
-		Name:  input.Name,
-		Query: input.Query,
+// DeleteTool removes the tool identified by owner/name.
+func (s *Service) DeleteTool(ctx context.Context, owner, name string) error {
+	owner = strings.TrimSpace(owner)
+	name = strings.TrimSpace(name)
+	if owner == "" || name == "" {
+		return newValidationError("owner and name are required")
+	}
+	return s.repo.Delete(ctx, owner, name)
+}
+
+// ListTools returns all tools matching the filters.
+func (s *Service) ListTools(ctx context.Context, input ListToolsInput) ([]domain.ToolRecord, error) {
+	return s.repo.List(ctx, persistence.Filters{
+		Owner:      strings.TrimSpace(input.Owner),
+		Visibility: strings.TrimSpace(input.Visibility),
 	})
-	if err != nil {
-		return nil, fmt.Errorf("list tools: %w", err)
-	}
-	return tools, nil
 }
 
-// SearchTools returns the top-k tools most similar to the provided description.
-func (s *Service) SearchTools(ctx context.Context, input SearchToolsInput) ([]domain.Tool, error) {
-	description := strings.TrimSpace(input.Description)
-	if description == "" {
-		return nil, fmt.Errorf("description is required")
+// SearchTools performs vector similarity search.
+func (s *Service) SearchTools(ctx context.Context, input SearchToolsInput) ([]domain.ScoredTool, error) {
+	embedding, err := s.embedDescription(ctx, input.Description)
+	if err != nil {
+		return nil, err
+	}
+	return s.repo.Search(ctx, embedding, persistence.SearchFilters{
+		Filters: persistence.Filters{
+			Owner:      strings.TrimSpace(input.Owner),
+			Visibility: strings.TrimSpace(input.Visibility),
+		},
+		Limit: input.Limit,
+	})
+}
+
+func (s *Service) embedDescription(ctx context.Context, description string) ([]float32, error) {
+	if strings.TrimSpace(description) == "" {
+		return nil, newValidationError("description is required")
 	}
 	if s.vectorizer == nil {
 		return nil, ErrVectorizerUnavailable
 	}
-
 	embedding, err := s.vectorizer.Embed(ctx, description)
 	if err != nil {
 		return nil, fmt.Errorf("vectorize description: %w", err)
 	}
-
-	limit := input.Limit
-	if limit <= 0 {
-		limit = 5
+	if len(embedding) != s.dim {
+		return nil, fmt.Errorf("vectorizer returned dimension %d but %d required", len(embedding), s.dim)
 	}
-
-	candidateLimit := limit * 3
-	if candidateLimit < limit {
-		candidateLimit = limit
-	}
-
-	tools, err := s.repo.SearchToolsByEmbedding(ctx, embedding, candidateLimit)
-	if err != nil {
-		return nil, fmt.Errorf("search tools: %w", err)
-	}
-
-	if s.reranker != nil && len(tools) > 0 {
-		ranked, err := s.reranker.Rank(ctx, description, tools)
-		if err != nil {
-			return nil, fmt.Errorf("rerank tools: %w", err)
-		}
-		if len(ranked) > 0 {
-			tools = ranked
-		}
-	}
-
-	if len(tools) > limit {
-		tools = tools[:limit]
-	}
-
-	return tools, nil
+	return embedding, nil
 }
 
-// DeleteTool removes a tool and its associated data.
-func (s *Service) DeleteTool(ctx context.Context, id uuid.UUID) error {
-	if err := s.repo.DeleteTool(ctx, id); err != nil {
-		if errors.Is(err, persistence.ErrNotFound) {
-			return ErrToolNotFound
-		}
-		return fmt.Errorf("delete tool: %w", err)
+func (s *Service) normalizeVisibility(value string) (string, error) {
+	vis := strings.ToLower(strings.TrimSpace(value))
+	if vis == "" {
+		return s.defaultVisibility, nil
 	}
-	return nil
-}
-
-// RecordAudit attaches an audit event to a tool.
-func (s *Service) RecordAudit(ctx context.Context, toolID uuid.UUID, input AuditInput) (domain.AuditEvent, error) {
-	if input.EventType == "" {
-		return domain.AuditEvent{}, fmt.Errorf("event_type is required")
+	switch vis {
+	case "public", "private":
+		return vis, nil
+	default:
+		return "", newValidationError("visibility must be public or private")
 	}
-	if input.Actor == "" {
-		return domain.AuditEvent{}, fmt.Errorf("actor is required")
-	}
-
-	if _, err := s.repo.GetToolByID(ctx, toolID); err != nil {
-		if errors.Is(err, persistence.ErrNotFound) {
-			return domain.AuditEvent{}, ErrToolNotFound
-		}
-		return domain.AuditEvent{}, fmt.Errorf("load tool: %w", err)
-	}
-
-	event := domain.AuditEvent{
-		ToolID:    toolID,
-		EventType: input.EventType,
-		Actor:     input.Actor,
-		Payload:   input.Payload,
-		CreatedAt: s.now(),
-	}
-
-	saved, err := s.repo.CreateAudit(ctx, event)
-	if err != nil {
-		return domain.AuditEvent{}, fmt.Errorf("create audit: %w", err)
-	}
-	return saved, nil
-}
-
-func (s *Service) getDetails(ctx context.Context, id uuid.UUID) (domain.ToolDetails, error) {
-	tool, err := s.repo.GetToolByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, persistence.ErrNotFound) {
-			return domain.ToolDetails{}, ErrToolNotFound
-		}
-		return domain.ToolDetails{}, fmt.Errorf("get tool: %w", err)
-	}
-
-	policies, err := s.repo.ListPolicies(ctx, id)
-	if err != nil {
-		return domain.ToolDetails{}, fmt.Errorf("list policies: %w", err)
-	}
-
-	audits, err := s.repo.ListAudits(ctx, id, 20)
-	if err != nil {
-		return domain.ToolDetails{}, fmt.Errorf("list audits: %w", err)
-	}
-
-	return domain.ToolDetails{
-		Tool:     tool,
-		Policies: policies,
-		Audits:   audits,
-	}, nil
 }
