@@ -14,7 +14,7 @@ LOGGER = logging.getLogger(__name__)
 class RegistryClient:
     """Minimal HTTP client for the registry."""
 
-    def __init__(self, base_url: str, timeout: float = 20.0) -> None:
+    def __init__(self, base_url: str, timeout: float = 60.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
@@ -43,14 +43,21 @@ class RegistryClient:
                 raise TypeError(f"Unsupported payload type: {type(payload)!r}")
 
         req = urllib.request.Request(url, data=data, headers=request_headers, method=method.upper())
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                body = resp.read().decode("utf-8")
-                return resp.getcode(), body
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            LOGGER.debug("HTTP %s %s failed: %s", method, url, exc)
-            return exc.code, body
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    body = resp.read().decode("utf-8")
+                    return resp.getcode(), body
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode("utf-8", errors="replace")
+                LOGGER.debug("HTTP %s %s failed: %s", method, url, exc)
+                return exc.code, body
+            except urllib.error.URLError as exc:
+                if attempts >= 3:
+                    raise
+                LOGGER.warning("Transient error on %s %s, retrying (%d/3): %s", method, url, attempts, exc)
 
     def request_json(
         self,

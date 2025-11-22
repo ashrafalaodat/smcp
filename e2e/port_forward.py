@@ -8,13 +8,16 @@ from typing import Optional
 
 
 def start_port_forward(namespace: str, service_name: str, port: int, log_file: Path) -> subprocess.Popen:
+    if port <= 0:
+        port = 18080
+    port_arg = f"{port}:8080"
     command = [
         "kubectl",
         "-n",
         namespace,
         "port-forward",
         f"svc/{service_name}",
-        f"{port}:80",
+        port_arg,
     ]
     with log_file.open("w", encoding="utf-8") as log:
         process = subprocess.Popen(command, stdout=log, stderr=log)
