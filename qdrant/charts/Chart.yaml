@@ -1,0 +1,6 @@
+apiVersion: v2
+name: qdrant
+version: 0.1.0
+description: GPU-enabled Qdrant vector database for MCP registry
+appVersion: "1.8.2"
+type: application

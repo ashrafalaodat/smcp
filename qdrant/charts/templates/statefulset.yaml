@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "qdrant.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "qdrant.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  serviceName: {{ include "qdrant.fullname" . }}
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "qdrant.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "qdrant.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: qdrant
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 6333
+              name: http
+            - containerPort: 6334
+              name: grpc
+          volumeMounts:
+            - name: data
+              mountPath: /qdrant/storage
+          {{- $limits := dict -}}
+          {{- if .Values.resources.limits }}
+          {{- $limits = deepCopy .Values.resources.limits -}}
+          {{- end -}}
+          {{- if .Values.gpu.enabled }}
+          {{- $_ := set $limits "nvidia.com/gpu" .Values.gpu.count -}}
+          {{- end -}}
+          {{- $requests := .Values.resources.requests -}}
+          {{- if or (gt (len $limits) 0) $requests }}
+          resources:
+            {{- if gt (len $limits) 0 }}
+            limits:
+              {{- toYaml $limits | nindent 14 }}
+            {{- end }}
+            {{- if $requests }}
+            requests:
+              {{- toYaml $requests | nindent 14 }}
+            {{- end }}
+          {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass }}
+        {{- end }}
