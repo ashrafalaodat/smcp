@@ -1,0 +1,42 @@
+# Namespace where all Flux controllers will run. Defaults to the Helm release namespace
+# but typically stays `flux-system` to match upstream conventions.
+targetNamespace: flux-system
+
+# Toggle creation of the namespace manifest that ships with the upstream install bundle.
+createNamespace: true
+
+# Whether to install the upstream CustomResourceDefinitions. Disable if you manage CRDs separately.
+installCRDs: true
+
+# Container image configuration for each Flux controller. Tags follow the v2.7.3 release manifest.
+images:
+  sourceController:
+    repository: ghcr.io/fluxcd/source-controller
+    tag: v1.7.3
+    digest: ""
+    pullPolicy: IfNotPresent
+  kustomizeController:
+    repository: ghcr.io/fluxcd/kustomize-controller
+    tag: v1.7.2
+    digest: ""
+    pullPolicy: IfNotPresent
+  helmController:
+    repository: ghcr.io/fluxcd/helm-controller
+    tag: v1.4.3
+    digest: ""
+    pullPolicy: IfNotPresent
+  notificationController:
+    repository: ghcr.io/fluxcd/notification-controller
+    tag: v1.7.4
+    digest: ""
+    pullPolicy: IfNotPresent
+  imageAutomationController:
+    repository: ghcr.io/fluxcd/image-automation-controller
+    tag: v1.0.3
+    digest: ""
+    pullPolicy: IfNotPresent
+  imageReflectorController:
+    repository: ghcr.io/fluxcd/image-reflector-controller
+    tag: v1.0.3
+    digest: ""
+    pullPolicy: IfNotPresent

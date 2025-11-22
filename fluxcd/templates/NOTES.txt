@@ -1,0 +1,8 @@
+Flux has been rendered into the `{{ include "fluxcd.namespace" . }}` namespace.
+
+Next steps:
+  1. Ensure the namespace exists (set `createNamespace=false` if you manage it yourself).
+  2. Apply the chart: `helm upgrade --install {{ .Release.Name }} ./fluxcd --namespace {{ include "fluxcd.namespace" . }} --create-namespace`.
+  3. Watch the controllers come up: `kubectl -n {{ include "fluxcd.namespace" . }} get pods`.
+
+Disable `installCRDs` once the CRDs are managed outside Helm to avoid accidental downgrades.
