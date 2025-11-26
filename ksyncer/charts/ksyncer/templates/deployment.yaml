@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ksyncer.fullname" . }}
+  labels:
+    {{- include "ksyncer.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "ksyncer.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ksyncer.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- range $k, $v := .Values.podAnnotations }}
+        {{ $k }}: {{ $v | quote }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ default (include "ksyncer.fullname" .) .Values.serviceAccount.name }}
+      imagePullSecrets:
+        {{- range .Values.imagePullSecrets }}
+        - name: {{ . }}
+        {{- end }}
+      containers:
+        - name: ksyncer
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - "--registry-url={{ .Values.registryUrl }}"
+            - "--concurrency={{ .Values.concurrency }}"
+            - "--requeue-delay={{ .Values.requeueDelay }}"
+            - "--leader-elect={{ .Values.leaderElection }}"
+            - "--metrics-bind-address={{ if .Values.metrics.enabled }}:{{ .Values.metrics.service.port }}{{ else }}0{{ end }}"
+            - "--health-probe-bind-address=:{{ .Values.health.port }}"
+          env:
+            - name: REGISTRY_URL
+              value: {{ .Values.registryUrl | quote }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.service.port }}
+            - name: health
+              containerPort: {{ .Values.health.port }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      nodeSelector:
+        {{- toYaml .Values.nodeSelector | nindent 8 }}
+      tolerations:
+        {{- toYaml .Values.tolerations | nindent 8 }}
+      affinity:
+        {{- toYaml .Values.affinity | nindent 8 }}

@@ -1,0 +1,39 @@
+image:
+  repository: ksyncer
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+registryUrl: "http://registry:8080"
+concurrency: 4
+requeueDelay: 30s
+leaderElection: true
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+
+resources: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+metrics:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 8080
+
+health:
+  port: 8081
+
+logLevel: info
+
+podAnnotations: {}
+
+imagePullSecrets: []

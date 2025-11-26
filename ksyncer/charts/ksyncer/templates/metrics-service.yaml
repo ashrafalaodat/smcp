@@ -1,0 +1,16 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "ksyncer.fullname" . }}-metrics
+  labels:
+    {{- include "ksyncer.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.metrics.service.type }}
+  selector:
+    {{- include "ksyncer.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.service.port }}
+      targetPort: metrics
+{{- end }}

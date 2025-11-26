@@ -1,0 +1,6 @@
+apiVersion: v2
+name: ksyncer
+version: 0.1.0
+appVersion: 0.1.0
+description: Operator that syncs Knative Services to the MCP registry.
+type: application
