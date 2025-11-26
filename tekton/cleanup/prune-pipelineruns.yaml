@@ -34,16 +34,36 @@ metadata:
   name: tekton-prune-pipelineruns
   namespace: oci
 spec:
-  schedule: "0 * * * *"
+  # run once per day at 00:00
+  schedule: "0 0 * * *"
+
+  # do not start a new Job if the previous one is still running
+  concurrencyPolicy: Forbid
+
+  # keep at most 1 succeeded / 1 failed job in history
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+
   jobTemplate:
     spec:
+      # how many times to retry the Job before marking it failed
+      backoffLimit: 3
+      # auto-cleanup finished Jobs (succeeded or failed) after 1 hour
+      ttlSecondsAfterFinished: 3600
+
       template:
+        metadata: {}
         spec:
           serviceAccountName: tekton-prune
           restartPolicy: OnFailure
+          dnsPolicy: ClusterFirst
+          schedulerName: default-scheduler
+          terminationGracePeriodSeconds: 30
+          securityContext: {}
           containers:
             - name: prune
               image: bitnami/kubectl:1.30.2
+              imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash
                 - -c
