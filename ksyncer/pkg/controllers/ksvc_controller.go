@@ -73,7 +73,7 @@ func (r *KServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	ann := svc.GetAnnotations()
+    ann := mergeAnnotations(svc)
 	desc := ann[annotations.KeyDescription]
 	if desc == "" {
 		r.Recorder.Event(svc, corev1.EventTypeWarning, eventReasonMissing, "ksyncer/description annotation required")
@@ -148,6 +148,24 @@ func (r *KServiceReconciler) patchStatusHash(ctx context.Context, svc *unstructu
 		return err
 	}
 	return r.Status().Patch(ctx, patched, client.MergeFrom(svc))
+}
+
+// mergeAnnotations combines top-level and spec.template.metadata.annotations.
+func mergeAnnotations(svc *unstructured.Unstructured) map[string]string {
+    out := map[string]string{}
+
+    if top := svc.GetAnnotations(); top != nil {
+        for k, v := range top {
+            out[k] = v
+        }
+    }
+
+    if tmpl, found, _ := unstructured.NestedStringMap(svc.Object, "spec", "template", "metadata", "annotations"); found {
+        for k, v := range tmpl {
+            out[k] = v
+        }
+    }
+    return out
 }
 
 // SetupWithManager wires the controller.
