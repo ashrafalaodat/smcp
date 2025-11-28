@@ -21,7 +21,7 @@ spec:
       default: main
     - name: repo_name
       description: Repository name (used for image path)
-      default: math
+      default: ""
     - name: image_tag
       description: Image tag (e.g., short commit SHA)
     - name: registry_host
@@ -30,6 +30,9 @@ spec:
     - name: dockerfile
       description: Relative path to the Dockerfile within the repo
       default: Dockerfile
+    - name: dockerfile_template_key
+      description: Key in tekton-dockerfiles ConfigMap to use when repo lacks a Dockerfile
+      default: Dockerfile-go
     - name: context_path
       description: Relative build context directory
       default: .
@@ -73,9 +76,9 @@ spec:
           - name: source
           - name: dockerconfig
         volumes:
-          - name: knative-dockerfiles
+          - name: tekton-dockerfiles
             configMap:
-              name: knative-dockerfiles
+              name: tekton-dockerfiles
         steps:
           - name: clone
             image: alpine/git:2.45.2
@@ -93,8 +96,8 @@ spec:
           - name: ensure-dockerfile
             image: alpine:3.20.3
             volumeMounts:
-              - name: knative-dockerfiles
-                mountPath: /knative-dockerfiles
+              - name: tekton-dockerfiles
+                mountPath: /tekton-dockerfiles
             script: |
               #!/bin/sh
               set -eu
@@ -108,8 +111,8 @@ spec:
                 rm -f "$(workspaces.source.path)/src/.uses-fallback"
                 exit 0
               fi
-              echo "[tekton] Repository missing $(params.dockerfile); using fallback Dockerfile-go"
-              cp /knative-dockerfiles/Dockerfile-go "$TARGET_DOCKERFILE"
+              echo "[tekton] Repository missing $(params.dockerfile); using fallback $(params.dockerfile_template_key)"
+              cp /tekton-dockerfiles/$(params.dockerfile_template_key) "$TARGET_DOCKERFILE"
               touch "$(workspaces.source.path)/src/.uses-fallback"
           - name: build-go-binary
             image: golang:1.22

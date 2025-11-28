@@ -42,7 +42,7 @@ In your Gitea repo settings (`gitea-admin/math`), create a webhook:
 ## Customizing the build
 
 - **Registry host:** If your registry runs elsewhere, edit `pipeline.yaml` (the `registry_host` param + `REGISTRY_HOST` env) and `triggers.yaml` to match.
-- **Dockerfile/context:** Adjust `pipeline.yaml` defaults if `math.git` stores its Dockerfile somewhere else. When no Dockerfile is present, the pipeline automatically injects `Dockerfile-go` from the `knative-dockerfiles` ConfigMap.
+- **Dockerfile/context:** Context stays at repo root (`.`). If a repo is missing a `Dockerfile`, the pipeline copies a template from the `tekton-dockerfiles` ConfigMap, keyed by `dockerfile_template_key` (default `Dockerfile-go`). Add more keys to that ConfigMap to support other runtimes.
 - **Image tag format:** The EventListener sets `image_tag` to `<short-sha>-<timestamp>` where `timestamp` is derived from `head_commit.timestamp` (`YYYYMMDDHHMMSS`). Update `triggers.yaml` if you want a different convention.
 - **Branch filter:** The CEL interceptor currently filters `refs/heads/main`. Update the expression in `triggers.yaml` if you want to watch more refs.
 

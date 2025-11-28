@@ -71,6 +71,8 @@ spec:
   params:
     - name: repoName
       value: $(body.repository.name)
+    - name: repoUrl
+      value: $(body.repository.clone_url)
     - name: imageTag
       value: $(extensions.shortSha)-$(extensions.timestamp)
 ---
@@ -82,6 +84,7 @@ metadata:
 spec:
   params:
     - name: repoName
+    - name: repoUrl
     - name: imageTag
   resourcetemplates:
     - apiVersion: tekton.dev/v1
@@ -94,6 +97,8 @@ spec:
         pipelineRef:
           name: git-image-build
         params:
+          - name: repo_url
+            value: $(tt.params.repoUrl)
           - name: repo_name
             value: $(tt.params.repoName)
           - name: image_tag
@@ -125,7 +130,7 @@ spec:
           params:
             - name: filter
               value: |
-                body.ref == 'refs/heads/main' && body.repository.clone_url == 'http://gitea-gitea:3000/gitea-admin/math.git'
+                body.ref == 'refs/heads/main'
             - name: overlays
               value:
                 - key: shortSha

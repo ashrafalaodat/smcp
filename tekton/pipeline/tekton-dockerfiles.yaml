@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tekton-dockerfiles
+  namespace: oci
+data:
+  Dockerfile-go: |
+    FROM golang:1.22 AS builder
+
+    WORKDIR /workspace
+    COPY go.mod .
+    RUN go mod download
+    COPY . .
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o func ./
+
+    FROM gcr.io/distroless/static:nonroot
+    COPY --from=builder /workspace/func /func
+    USER nonroot:nonroot
+    ENTRYPOINT ["/func"]
